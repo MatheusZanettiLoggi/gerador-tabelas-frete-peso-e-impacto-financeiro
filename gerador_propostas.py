@@ -49,10 +49,16 @@ def processar_slos(df_slos):
 
 @st.cache_data
 def processar_nomes_leves(df_volume):
-    # Cria o mapeamento de "Nome Extenso (Routing Code)"
     mapping = df_volume[['Leve', 'Routing Code']].drop_duplicates().dropna()
     mapping['nome_completo'] = mapping['Leve'] + " (" + mapping['Routing Code'] + ")"
     return mapping
+
+def formatar_moeda(valor):
+    try:
+        # Formata para 2 casas decimais e troca ponto por vírgula no padrão BR
+        return f"R$ {float(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+    except:
+        return valor
 
 # --- FLUXO PRINCIPAL ---
 if file_frete and file_abrangencia and file_slos and file_volume:
@@ -72,24 +78,27 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
     st.header("2. Seleção de Leves")
     
-    # Prepara lista de leves e dicionário para reverter a seleção (nome_completo -> LMC name original)
+    # Prepara lista de leves e dicionários de mapeamento
     leves_disponiveis = df_frete_clean['LMC name'].dropna().unique().tolist()
     
-    # Criar um dict: chave = nome formatado, valor = LMC name
     mapa_nomes = {}
+    mapa_routing = {} # Novo dicionário para pegar a sigla (Routing Code)
+    
     for lmc in leves_disponiveis:
         match = df_nomes_leves[df_nomes_leves['Leve'] == lmc]
         if not match.empty:
             nome_formatado = match['nome_completo'].values[0]
+            routing_code = match['Routing Code'].values[0]
             mapa_nomes[nome_formatado] = lmc
+            mapa_routing[lmc] = routing_code
         else:
-            mapa_nomes[lmc] = lmc # Fallback caso não ache o nome na base de volume
+            mapa_nomes[lmc] = lmc
+            mapa_routing[lmc] = "-"
             
     lista_nomes_exibicao = list(mapa_nomes.keys())
 
     leves_selecionados_formatados = st.multiselect("Selecione os Leves envolvidos na negociação:", lista_nomes_exibicao)
     
-    # Reverte para os nomes originais (LMC name) para filtrar as bases
     leves_selecionados = [mapa_nomes[nome] for nome in leves_selecionados_formatados]
 
     if leves_selecionados:
@@ -99,7 +108,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
         cidades_disponiveis = df_slos_clean['Cidade'].dropna().unique().tolist()
         cidades_base_dict = {}
         
-        # Cria as colunas para organizar as caixas de seleção
         cols = st.columns(len(leves_selecionados))
         
         for idx, leve in enumerate(leves_selecionados):
@@ -111,7 +119,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
         st.divider()
         st.header("4. Dados Atuais dos Leves Selecionados")
         
-        # Prepara df de abrangência com renomeação solicitada
         df_abrangencia.rename(columns={'Região de preço 2023': 'Região de preço'}, inplace=True)
 
         tab1, tab2 = st.tabs(["Tabela Frete Peso Atual", "Abrangência e Prazos"])
@@ -121,9 +128,33 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 nome_exibicao = leves_selecionados_formatados[idx]
                 st.subheader(f"Tabela Frete Peso: {nome_exibicao}")
                 
-                df_frete_leve = df_frete_clean[df_frete_clean['LMC name'] == leve]
-                st.dataframe(df_frete_leve[['LMC name', 'table name', 'Faixa de peso (g/m³)', 'on time amount', 'out of time amount']], use_container_width=True)
-                st.markdown("<br>", unsafe_allow_html=True) # Espaçamento
+                df_frete_leve = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
+                
+                # Adiciona o Routing Code
+                df_frete_leve['Routing Code'] = mapa_routing.get(leve, "-")
+                
+                # Renomeia colunas
+                df_frete_leve.rename(columns={
+                    'label': 'Região de preço',
+                    'on time amount': 'Valor do pacote dentro do prazo',
+                    'out of time amount': 'Valor do pacote fora do prazo'
+                }, inplace=True)
+                
+                # Formata como moeda
+                df_frete_leve['Valor do pacote dentro do prazo'] = df_frete_leve['Valor do pacote dentro do prazo'].apply(formatar_moeda)
+                df_frete_leve['Valor do pacote fora do prazo'] = df_frete_leve['Valor do pacote fora do prazo'].apply(formatar_moeda)
+                
+                # Define a ordem das colunas
+                colunas_frete_exibicao = [
+                    'LMC name', 'Routing Code', 'Região de preço', 'Faixa de peso (g/m³)',
+                    'Valor do pacote dentro do prazo', 'Valor do pacote fora do prazo', 'table name'
+                ]
+                
+                # Filtra apenas as colunas que existem para evitar quebra caso alguma falte
+                colunas_presentes_frete = [col for col in colunas_frete_exibicao if col in df_frete_leve.columns]
+                
+                st.dataframe(df_frete_leve[colunas_presentes_frete], use_container_width=True, hide_index=True)
+                st.markdown("<br>", unsafe_allow_html=True)
             
         with tab2:
             for idx, leve in enumerate(leves_selecionados):
@@ -134,14 +165,15 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 df_abrangencia_leve = df_abrangencia[df_abrangencia['LMC Name'] == leve].copy()
                 
-                # Garante que o SLO Local usado é o que veio do arquivo "Abrangências atuais"
-                # A coluna no arquivo se chama "Prazo adicional"
+                # Adiciona o Routing Code
+                df_abrangencia_leve['Routing Code'] = mapa_routing.get(leve, "-")
                 df_abrangencia_leve['SLO Local (Arquivo)'] = df_abrangencia_leve['Prazo adicional']
                 
-                colunas_exibicao = ['LMC Name', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
-                colunas_presentes = [col for col in colunas_exibicao if col in df_abrangencia_leve.columns]
+                # Define a ordem das colunas
+                colunas_abrangencia_exibicao = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
+                colunas_presentes_abrangencia = [col for col in colunas_abrangencia_exibicao if col in df_abrangencia_leve.columns]
                 
-                st.dataframe(df_abrangencia_leve[colunas_presentes], use_container_width=True)
+                st.dataframe(df_abrangencia_leve[colunas_presentes_abrangencia], use_container_width=True, hide_index=True)
                 st.markdown("<br>", unsafe_allow_html=True)
 
 else:
