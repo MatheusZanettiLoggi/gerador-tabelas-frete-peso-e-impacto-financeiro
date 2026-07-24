@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 
 st.set_page_config(page_title="Gerador de Propostas - Leves", layout="wide")
 
@@ -55,10 +56,16 @@ def processar_nomes_leves(df_volume):
 
 def formatar_moeda(valor):
     try:
-        # Formata para 2 casas decimais e troca ponto por vírgula no padrão BR
         return f"R$ {float(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     except:
         return valor
+
+def extrair_estado(nome_leve):
+    # Procura pelo padrão de hífen seguido por espaço e duas letras maiúsculas (Ex: "- SP", "- SC")
+    match = re.search(r'-\s*([A-Z]{2})\b', nome_leve)
+    if match:
+        return match.group(1)
+    return None
 
 # --- FLUXO PRINCIPAL ---
 if file_frete and file_abrangencia and file_slos and file_volume:
@@ -78,11 +85,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
     st.header("2. Seleção de Leves")
     
-    # Prepara lista de leves e dicionários de mapeamento
     leves_disponiveis = df_frete_clean['LMC name'].dropna().unique().tolist()
     
     mapa_nomes = {}
-    mapa_routing = {} # Novo dicionário para pegar a sigla (Routing Code)
+    mapa_routing = {} 
     
     for lmc in leves_disponiveis:
         match = df_nomes_leves[df_nomes_leves['Leve'] == lmc]
@@ -105,16 +111,36 @@ if file_frete and file_abrangencia and file_slos and file_volume:
         st.divider()
         st.header("3. Definição das Cidades Base")
         
-        cidades_disponiveis = df_slos_clean['Cidade'].dropna().unique().tolist()
         cidades_base_dict = {}
-        
         cols = st.columns(len(leves_selecionados))
         
         for idx, leve in enumerate(leves_selecionados):
             nome_exibicao = leves_selecionados_formatados[idx]
+            estado_do_leve = extrair_estado(leve)
+            
+            # Filtra as cidades base pelo estado do Leve
+            if estado_do_leve:
+                df_cidades_estado = df_slos_clean[df_slos_clean['State'] == estado_do_leve]
+            else:
+                df_cidades_estado = df_slos_clean # Fallback caso o padrão não seja encontrado no nome
+                
+            # Cria o dicionário para mapear a visualização "Cidade - UF" de volta para "Cidade"
+            opcoes_cidades = {}
+            for _, row in df_cidades_estado.iterrows():
+                cid = str(row['Cidade'])
+                est = str(row['State'])
+                txt_display = f"{cid} - {est}"
+                opcoes_cidades[txt_display] = cid
+                
+            lista_opcoes_display = sorted(list(opcoes_cidades.keys()))
+
             with cols[idx]:
-                cidade = st.selectbox(f"Cidade Base para:\n{nome_exibicao}", cidades_disponiveis, key=f"cidade_{leve}")
-                cidades_base_dict[leve] = cidade
+                cidade_escolhida_display = st.selectbox(
+                    f"Cidade Base para:\n{nome_exibicao}", 
+                    lista_opcoes_display, 
+                    key=f"cidade_{leve}"
+                )
+                cidades_base_dict[leve] = opcoes_cidades[cidade_escolhida_display]
 
         st.divider()
         st.header("4. Dados Atuais dos Leves Selecionados")
@@ -130,27 +156,22 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 df_frete_leve = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
                 
-                # Adiciona o Routing Code
                 df_frete_leve['Routing Code'] = mapa_routing.get(leve, "-")
                 
-                # Renomeia colunas
                 df_frete_leve.rename(columns={
                     'label': 'Região de preço',
                     'on time amount': 'Valor do pacote dentro do prazo',
                     'out of time amount': 'Valor do pacote fora do prazo'
                 }, inplace=True)
                 
-                # Formata como moeda
                 df_frete_leve['Valor do pacote dentro do prazo'] = df_frete_leve['Valor do pacote dentro do prazo'].apply(formatar_moeda)
                 df_frete_leve['Valor do pacote fora do prazo'] = df_frete_leve['Valor do pacote fora do prazo'].apply(formatar_moeda)
                 
-                # Define a ordem das colunas
                 colunas_frete_exibicao = [
                     'LMC name', 'Routing Code', 'Região de preço', 'Faixa de peso (g/m³)',
                     'Valor do pacote dentro do prazo', 'Valor do pacote fora do prazo', 'table name'
                 ]
                 
-                # Filtra apenas as colunas que existem para evitar quebra caso alguma falte
                 colunas_presentes_frete = [col for col in colunas_frete_exibicao if col in df_frete_leve.columns]
                 
                 st.dataframe(df_frete_leve[colunas_presentes_frete], use_container_width=True, hide_index=True)
@@ -165,11 +186,9 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 df_abrangencia_leve = df_abrangencia[df_abrangencia['LMC Name'] == leve].copy()
                 
-                # Adiciona o Routing Code
                 df_abrangencia_leve['Routing Code'] = mapa_routing.get(leve, "-")
                 df_abrangencia_leve['SLO Local (Arquivo)'] = df_abrangencia_leve['Prazo adicional']
                 
-                # Define a ordem das colunas
                 colunas_abrangencia_exibicao = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
                 colunas_presentes_abrangencia = [col for col in colunas_abrangencia_exibicao if col in df_abrangencia_leve.columns]
                 
