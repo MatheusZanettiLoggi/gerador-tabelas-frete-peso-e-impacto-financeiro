@@ -1,17 +1,3 @@
-Adicionar a exportação em PDF é o toque final perfeito para tornar o aplicativo uma ferramenta executiva completa. Isso permite que a sua equipe documente as simulações e leve um "Resumo Executivo" para reuniões de aprovação com a liderança.
-
-Para gerar arquivos PDF nativamente em Python, **você precisará instalar uma biblioteca chamada `fpdf` no seu ambiente**.
-
-Abra o seu terminal (ou prompt de comando) e digite:
-
-```bash
-pip install fpdf
-
-```
-
-Após instalar a biblioteca, substitua todo o conteúdo do seu arquivo `gerador_propostas.py` pelo código abaixo. O aplicativo agora vai checar se o `fpdf` está instalado e, se estiver, vai liberar uma terceira coluna na etapa final com o botão **"Baixar Relatório (PDF)"** contendo o resumo exato de todas as volumetrias, faturamentos, tickets médios e as variações de cada região.
-
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -1028,5 +1014,3 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
 else:
     st.info("Por favor, faça o upload de **todas as 4 bases** na barra lateral para prosseguir.")
-
-```
