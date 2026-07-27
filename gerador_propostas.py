@@ -4,6 +4,7 @@ import numpy as np
 import re
 import os
 import io
+import unicodedata
 
 st.set_page_config(page_title="Gerador de Propostas - Leves", layout="wide")
 
@@ -43,6 +44,12 @@ def load_local_excel(filename):
     if not os.path.exists(filename):
         return None
     return pd.read_excel(filename)
+
+def normalize_string(s):
+    """Remove acentos, espaços extras e transforma em minúsculo para cruzamento seguro."""
+    if pd.isna(s): return ""
+    s = str(s).lower().strip()
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
 def padronizar_colunas_volume(df):
     mapa_colunas = {
@@ -124,11 +131,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_volume = load_data(file_volume)
             df_volume = padronizar_colunas_volume(df_volume)
             
+            # Aplica a normalização de Strings para cruzar cidades com segurança
+            df_volume['Cidade_Normalizada'] = df_volume['Cidade'].apply(normalize_string)
+            df_abrangencia['Cidade_Normalizada'] = df_abrangencia['Cidade'].apply(normalize_string)
+            
             df_price_var_clean = processar_price_var(df_price_var_raw)
             
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
             st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
-            st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
             st.stop()
             
         if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
@@ -400,7 +410,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         cidade_movida = row['Cidade']
                                         
                                         vol_data = df_volume[(df_volume['Leve'] == leve_origem) & 
-                                                             (df_volume['Cidade'].astype(str).str.lower() == str(cidade_movida).lower()) & 
+                                                             (df_volume['Cidade_Normalizada'] == normalize_string(cidade_movida)) & 
                                                              (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
                                         volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
                                         
@@ -424,7 +434,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         for _, row in cidades_exist.iterrows():
                                             cid_ext = row['Cidade']
                                             vol_dest_data = df_volume[(df_volume['Leve'] == nome_destino_final) & 
-                                                                      (df_volume['Cidade'].astype(str).str.lower() == str(cid_ext).lower()) & 
+                                                                      (df_volume['Cidade_Normalizada'] == normalize_string(cid_ext)) & 
                                                                       (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
                                             volume_dest = vol_dest_data['# Total Packages'].sum() if not vol_dest_data.empty else 0
                                             
@@ -490,7 +500,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     leve_orig = row['LMC Name']
                                     cid_movida = row['Cidade']
                                     
-                                    vols_cidade = df_volume[(df_volume['Leve'] == leve_orig) & (df_volume['Cidade'].astype(str).str.lower() == str(cid_movida).lower())]
+                                    vols_cidade = df_volume[(df_volume['Leve'] == leve_orig) & (df_volume['Cidade_Normalizada'] == normalize_string(cid_movida))]
                                     for _, v_row in vols_cidade.iterrows():
                                         faixa_peso = v_row['Faixa pesos']
                                         qtd_pacotes = v_row['# Total Packages']
@@ -513,7 +523,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
                                     for _, row in cidades_exist.iterrows():
                                         cid_ext = row['Cidade']
-                                        vols_cidade = df_volume[(df_volume['Leve'] == nome_destino_final) & (df_volume['Cidade'].astype(str).str.lower() == str(cid_ext).lower())]
+                                        vols_cidade = df_volume[(df_volume['Leve'] == nome_destino_final) & (df_volume['Cidade_Normalizada'] == normalize_string(cid_ext))]
                                         
                                         for _, v_row in vols_cidade.iterrows():
                                             faixa_peso = v_row['Faixa pesos']
@@ -560,7 +570,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
                                     for _, row in cidades_exist.iterrows():
                                         cid_ext = row['Cidade']
-                                        vols_cidade = df_volume[(df_volume['Leve'] == nome_destino_final) & (df_volume['Cidade'].astype(str).str.lower() == str(cid_ext).lower())]
+                                        vols_cidade = df_volume[(df_volume['Leve'] == nome_destino_final) & (df_volume['Cidade_Normalizada'] == normalize_string(cid_ext))]
                                         
                                         for _, v_row in vols_cidade.iterrows():
                                             faixa_peso = v_row['Faixa pesos']
@@ -592,6 +602,31 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
                         texto_completo_memorial = "\n".join(texto_explicativo)
+
+                        # --- ALERTAS DE MISROUTES / PACOTES IGNORADOS ---
+                        ignorado_info = []
+                        total_ignorados_geral = 0
+                        leves_para_checar = set(leves_selecionados)
+                        if tipo_destino == "Um Leve Existente (já selecionado)":
+                            leves_para_checar.add(nome_destino_final)
+
+                        for leve in leves_para_checar:
+                            vol_leve = df_volume[df_volume['Leve'] == leve]
+                            cidades_oficiais = df_abrangencia[df_abrangencia['LMC Name'] == leve]['Cidade_Normalizada'].unique()
+                            vol_fora = vol_leve[~vol_leve['Cidade_Normalizada'].isin(cidades_oficiais)]
+                            
+                            if not vol_fora.empty:
+                                qtd_fora = vol_fora['# Total Packages'].sum()
+                                total_ignorados_geral += qtd_fora
+                                top_erros = vol_fora.groupby('Cidade')['# Total Packages'].sum().sort_values(ascending=False).head(3)
+                                exemplos_str = ", ".join([f"{cid} ({qtd} pct)" for cid, qtd in top_erros.items()])
+                                ignorado_info.append(f"**{leve}:** {int(qtd_fora)} pacotes descartados. *(Ex: {exemplos_str})*")
+
+                        if total_ignorados_geral > 0:
+                            with st.expander(f"⚠️ {int(total_ignorados_geral)} pacotes não contabilizados (Misroutes e Erros de Digitação)", expanded=False):
+                                st.markdown("Os pacotes abaixo constam na base de volume, mas as cidades informadas **não existem** no contrato oficial (Abrangência) do Leve. Eles foram automaticamente isolados e desconsiderados para não sujar o cálculo financeiro das tabelas.")
+                                for info in ignorado_info:
+                                    st.markdown(f"- {info}")
                         
                         # --- EXIBIÇÃO DE FATURAMENTO DO PARCEIRO ---
                         st.subheader("🤝 Visão do Parceiro (Faturamento do Leve)")
