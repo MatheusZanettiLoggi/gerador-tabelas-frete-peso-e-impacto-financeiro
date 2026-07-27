@@ -44,6 +44,23 @@ def load_local_excel(filename):
         return None
     return pd.read_excel(filename)
 
+def padronizar_colunas_volume(df):
+    """Remove prefixos do Looker (Ex: 'Charge Leve Leve' -> 'Leve') para evitar quebra do app"""
+    renames = {}
+    for col in df.columns:
+        col_str = str(col)
+        if col_str.endswith("Leve"):
+            renames[col_str] = "Leve"
+        elif col_str.endswith("Routing Code"):
+            renames[col_str] = "Routing Code"
+        elif col_str.endswith("Region label"):
+            renames[col_str] = "Region label"
+        elif col_str.endswith("Total Packages"):
+            renames[col_str] = "# Total Packages"
+        elif col_str.endswith("Faixa pesos"):
+            renames[col_str] = "Faixa pesos"
+    return df.rename(columns=renames)
+
 @st.cache_data
 def processar_frete(df_frete):
     df_recentes = df_frete.drop_duplicates(subset=['LMC name'], keep='first')
@@ -92,12 +109,25 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_frete = load_data(file_frete)
             df_abrangencia = load_data(file_abrangencia)
             df_slos = load_data(file_slos)
-            df_volume = load_data(file_volume)
             
+            # Carrega e imediatamente padroniza as colunas do volume
+            df_volume = load_data(file_volume)
+            df_volume = padronizar_colunas_volume(df_volume)
+            
+            df_price_var_clean = processar_price_var(df_price_var_raw)
+            
+        # VALIDAÇÃO DE SEGURANÇA: Mostra erro amigável se o Looker mudar muito os nomes
+        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
+            st.error("🚨 **Colunas alteradas no arquivo de Volume!**")
+            st.markdown(f"O aplicativo procurava por colunas terminadas em **'Leve'** e **'Routing Code'**.")
+            st.info(f"📋 **Colunas que vieram no seu arquivo Excel:** `{list(df_volume.columns)}`")
+            st.markdown("> **Dica:** Na hora de exportar do Looker, vá em 'Opções Avançadas' e marque a caixinha **'Remover nome da visualização de dados'**. Se preferir, me avise os novos nomes acima para eu ajustar o código!")
+            st.stop()
+            
+        with st.spinner("Finalizando processamento..."):
             df_frete_clean = processar_frete(df_frete)
             df_slos_clean = processar_slos(df_slos)
             df_nomes_leves = processar_nomes_leves(df_volume)
-            df_price_var_clean = processar_price_var(df_price_var_raw)
             
         st.sidebar.success("Todas as bases carregadas!")
     
@@ -250,7 +280,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_nova_abrangencia['Novo SLO Local'] = df_nova_abrangencia['SLO'] - slo_base_dest_val
                         df_nova_abrangencia['Novo SLO Local'] = df_nova_abrangencia['Novo SLO Local'].apply(lambda x: x if x > 0 else 0)
                         
-                        # Padronizando o nome da coluna para visualização e exportação
                         df_nova_abrangencia.rename(columns={'LMC Name': 'LMC Name (Origem)'}, inplace=True)
                         colunas_finais_abrangencia = ['Região de preço', 'Cidade', 'State', 'Novo SLO Local', 'LMC Name (Origem)']
                         
@@ -266,13 +295,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             soma_volumes = 0
                             
                             for leve_origem in leves_origem:
-                                # Filtra o volume especificamente para a primeira faixa de peso (01 0 to 300) usando a nova coluna 'Faixa pesos'
                                 if "Faixa pesos" in df_volume.columns:
                                     vol_data = df_volume[(df_volume['Leve'] == leve_origem) & 
                                                          (df_volume['Region label'] == regiao) & 
                                                          (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
                                 else:
-                                    # Fallback caso a coluna mude novamente
                                     vol_data = df_volume[(df_volume['Leve'] == leve_origem) & (df_volume['Region label'] == regiao)]
                                     
                                 volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
@@ -322,13 +349,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         st.markdown("### 📥 Download da Proposta")
                         st.markdown("Faça o download das tabelas geradas acima em formato Excel para envio/apresentação.")
                         
-                        # Cria o arquivo Excel em memória
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
                             df_nova_abrangencia[colunas_finais_abrangencia].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
                             df_exibicao_tabela.to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
                         
-                        # Botão de download do Streamlit
                         st.download_button(
                             label="Baixar Proposta em Excel",
                             data=output.getvalue(),
