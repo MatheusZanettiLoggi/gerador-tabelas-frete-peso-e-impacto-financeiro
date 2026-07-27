@@ -128,6 +128,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
             st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
+            st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
             st.stop()
             
         if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
@@ -324,7 +325,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     regioes_movimentadas = df_movidos['Região de preço'].unique()
 
                     with st.expander("8. Ajustes Comerciais (Opcional)", expanded=True):
-                        st.markdown("Insira um percentual de reajuste (positivo ou negativo) para as tabelas do Leve de destino, caso tenha sido negociado. Deixe 0 para manter o valor calculado ou a tabela existente.")
+                        st.markdown("Insira um percentual de reajuste (positivo ou negativo) para as tabelas do Leve de destino. Deixe 0 para manter o valor calculado.")
                         ajustes_dict = {}
                         cols_ajuste = st.columns(3)
                         for i, regiao in enumerate(sorted(regioes_finais_destino)):
@@ -340,9 +341,16 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         texto_explicativo.append(f"Destino: {nome_destino_final}")
                         texto_explicativo.append(f"Estratégia Escolhida: {estrategia_preco}\n")
                         
-                        custo_anterior_total = 0
-                        custo_novo_total = 0
-                        volume_total_pacotes = 0
+                        # Variáveis Globais de Agregação
+                        global_vol_destino_original = 0
+                        global_custo_destino_original = 0
+                        
+                        global_vol_migrado = 0
+                        global_custo_migrado_original = 0
+                        
+                        global_custo_novo_total = 0
+                        
+                        detalhes_regioes = {}
                         
                         for regiao in regioes_finais_destino:
                             texto_explicativo.append(f"--------------------------------------------------")
@@ -449,6 +457,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     texto_explicativo.append(f"{fx}: Mult {mult:.2f} x {formatar_moeda(base_on)} = {formatar_moeda(val)}")
                                 
                                 # IMPACTO DESTA REGIÃO
+                                reg_vol_antigo_loggi = 0
+                                reg_custo_antigo_loggi = 0
+                                reg_custo_novo_loggi = 0
+                                
                                 for _, row in cidades_mov_regiao.iterrows():
                                     leve_orig = row['LMC Name']
                                     cid_movida = row['Cidade']
@@ -464,9 +476,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso (g/m³)'] == faixa_peso]
                                         preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
                                         
-                                        custo_anterior_total += (qtd_pacotes * preco_antigo)
-                                        custo_novo_total += (qtd_pacotes * preco_novo)
-                                        volume_total_pacotes += qtd_pacotes
+                                        global_vol_migrado += qtd_pacotes
+                                        global_custo_migrado_original += (qtd_pacotes * preco_antigo)
+                                        global_custo_novo_total += (qtd_pacotes * preco_novo)
+                                        
+                                        reg_vol_antigo_loggi += qtd_pacotes
+                                        reg_custo_antigo_loggi += (qtd_pacotes * preco_antigo)
+                                        reg_custo_novo_loggi += (qtd_pacotes * preco_novo)
                                         
                                 if tipo_destino == "Um Leve Existente (já selecionado)":
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
@@ -484,16 +500,29 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso (g/m³)'] == faixa_peso]
                                             preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
                                             
-                                            custo_anterior_total += (qtd_pacotes * preco_antigo)
-                                            custo_novo_total += (qtd_pacotes * preco_novo)
-                                            volume_total_pacotes += qtd_pacotes
+                                            global_vol_destino_original += qtd_pacotes
+                                            global_custo_destino_original += (qtd_pacotes * preco_antigo)
+                                            global_custo_novo_total += (qtd_pacotes * preco_novo)
+                                            
+                                            reg_vol_antigo_loggi += qtd_pacotes
+                                            reg_custo_antigo_loggi += (qtd_pacotes * preco_antigo)
+                                            reg_custo_novo_loggi += (qtd_pacotes * preco_novo)
                                 
+                                detalhes_regioes[regiao] = {
+                                    'vol': reg_vol_antigo_loggi,
+                                    'custo_antigo': reg_custo_antigo_loggi,
+                                    'custo_novo': reg_custo_novo_loggi
+                                }
                                 texto_explicativo.append("\n")
 
                             else:
                                 texto_explicativo.append("Nenhuma movimentação nesta região. Tabela atual do Leve mantida.\n")
                                 df_regiao_tabela = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao)].copy()
                                 df_regiao_tabela.rename(columns={'label': 'Região de Preço', 'on time amount': 'Valor dentro do prazo', 'out of time amount': 'Valor fora do prazo'}, inplace=True)
+                                
+                                reg_vol_antigo_loggi = 0
+                                reg_custo_antigo_loggi = 0
+                                reg_custo_novo_loggi = 0
                                 
                                 # APLICAÇÃO DO AJUSTE COMERCIAL MESMO EM TABELAS MANTIDAS
                                 ajuste_perc = ajustes_dict.get(regiao, 0.0)
@@ -503,7 +532,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
                                     texto_explicativo.append(f">> Ajuste Comercial: Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
                                     
-                                    # Calcula impacto se houver ajuste em tabela mantida
+                                if tipo_destino == "Um Leve Existente (já selecionado)":
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
                                     for _, row in cidades_exist.iterrows():
                                         cid_ext = row['Cidade']
@@ -519,9 +548,20 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso (g/m³)'] == faixa_peso]
                                             preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
                                             
-                                            custo_anterior_total += (qtd_pacotes * preco_antigo)
-                                            custo_novo_total += (qtd_pacotes * preco_novo)
-                                            volume_total_pacotes += qtd_pacotes
+                                            global_vol_destino_original += qtd_pacotes
+                                            global_custo_destino_original += (qtd_pacotes * preco_antigo)
+                                            global_custo_novo_total += (qtd_pacotes * preco_novo)
+                                            
+                                            reg_vol_antigo_loggi += qtd_pacotes
+                                            reg_custo_antigo_loggi += (qtd_pacotes * preco_antigo)
+                                            reg_custo_novo_loggi += (qtd_pacotes * preco_novo)
+                                            
+                                if ajuste_perc != 0.0:
+                                    detalhes_regioes[regiao] = {
+                                        'vol': reg_vol_antigo_loggi,
+                                        'custo_antigo': reg_custo_antigo_loggi,
+                                        'custo_novo': reg_custo_novo_loggi
+                                    }
                             
                             df_regiao_tabela = df_regiao_tabela[['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']]
                             lista_novas_tabelas.append(df_regiao_tabela)
@@ -529,38 +569,91 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
                         texto_completo_memorial = "\n".join(texto_explicativo)
                         
-                        # --- EXIBIÇÃO DO IMPACTO FINANCEIRO ---
-                        impacto_financeiro = custo_novo_total - custo_anterior_total
+                        # --- EXIBIÇÃO DE FATURAMENTO DO PARCEIRO ---
+                        st.subheader("🤝 Visão do Parceiro (Faturamento do Leve)")
+                        st.markdown("Esta visão demonstra o tamanho da operação do parceiro **antes** (sem as cidades novas) e **depois** de absorver o novo escopo.")
                         
-                        ticket_antigo = custo_anterior_total / volume_total_pacotes if volume_total_pacotes > 0 else 0
-                        ticket_novo = custo_novo_total / volume_total_pacotes if volume_total_pacotes > 0 else 0
-                        percentual_impacto = (impacto_financeiro / custo_anterior_total) * 100 if custo_anterior_total > 0 else 0
+                        vol_parceiro_novo = global_vol_destino_original + global_vol_migrado
+                        tk_parceiro_antigo = global_custo_destino_original / global_vol_destino_original if global_vol_destino_original > 0 else 0
+                        tk_parceiro_novo = global_custo_novo_total / vol_parceiro_novo if vol_parceiro_novo > 0 else 0
+                        crescimento_parceiro = global_custo_novo_total - global_custo_destino_original
+                        perc_crescimento = (crescimento_parceiro / global_custo_destino_original) * 100 if global_custo_destino_original > 0 else 100
                         
-                        st.subheader("📊 Impacto Financeiro (30 dias)")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        
-                        with col1:
-                            st.metric("Custo Antigo (Cidades afetadas)", formatar_moeda(custo_anterior_total))
-                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(volume_total_pacotes):,} pacotes</span>", unsafe_allow_html=True)
-                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(ticket_antigo)}</span>", unsafe_allow_html=True)
+                        cp1, cp2, cp3 = st.columns(3)
+                        with cp1:
+                            st.metric("Faturamento Atual (Sem Novas Cidades)", formatar_moeda(global_custo_destino_original))
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(global_vol_destino_original):,} pacotes</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(tk_parceiro_antigo)}</span>", unsafe_allow_html=True)
+                        with cp2:
+                            st.metric("Novo Faturamento Projetado", formatar_moeda(global_custo_novo_total))
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(vol_parceiro_novo):,} pacotes</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(tk_parceiro_novo)}</span>", unsafe_allow_html=True)
+                        with cp3:
+                            st.metric("Crescimento da Operação", formatar_moeda(crescimento_parceiro))
+                            st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▲ +{perc_crescimento:.2f}% de aumento no faturamento</span>", unsafe_allow_html=True)
 
-                        with col2:
-                            st.metric("Novo Custo Projetado", formatar_moeda(custo_novo_total))
-                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(volume_total_pacotes):,} pacotes</span>", unsafe_allow_html=True)
-                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(ticket_novo)}</span>", unsafe_allow_html=True)
+                        st.divider()
 
-                        with col3:
-                            if impacto_financeiro > 0:
-                                st.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"+{formatar_moeda(impacto_financeiro)} (Aumento de custo)", delta_color="inverse")
-                                st.markdown(f"<span style='font-size: 0.9em; color: #ff4b4b; font-weight: bold;'>▲ +{percentual_impacto:.2f}%</span>", unsafe_allow_html=True)
-                            elif impacto_financeiro < 0:
-                                st.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"{formatar_moeda(impacto_financeiro)} (Economia)", delta_color="normal")
-                                st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▼ {percentual_impacto:.2f}%</span>", unsafe_allow_html=True)
+                        # --- EXIBIÇÃO DE IMPACTO LOGGI ---
+                        st.subheader("📉 Visão Loggi (Impacto Financeiro Real)")
+                        st.markdown("Esta visão compara o custo da volumetria total afetada (Destino + Origem) na **tabela antiga** versus a **tabela nova projetada**.")
+                        
+                        custo_loggi_antigo = global_custo_destino_original + global_custo_migrado_original
+                        vol_loggi_total = global_vol_destino_original + global_vol_migrado
+                        tk_loggi_antigo = custo_loggi_antigo / vol_loggi_total if vol_loggi_total > 0 else 0
+                        tk_loggi_novo = global_custo_novo_total / vol_loggi_total if vol_loggi_total > 0 else 0
+                        
+                        impacto_loggi = global_custo_novo_total - custo_loggi_antigo
+                        perc_impacto_loggi = (impacto_loggi / custo_loggi_antigo) * 100 if custo_loggi_antigo > 0 else 0
+
+                        cl1, cl2, cl3 = st.columns(3)
+                        with cl1:
+                            st.metric("Custo Antigo Global (Destino + Cidades Migradas)", formatar_moeda(custo_loggi_antigo))
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(vol_loggi_total):,} pacotes</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Antigo: {formatar_moeda(tk_loggi_antigo)}</span>", unsafe_allow_html=True)
+                        with cl2:
+                            st.metric("Novo Custo Global Projetado", formatar_moeda(global_custo_novo_total))
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(vol_loggi_total):,} pacotes</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(tk_loggi_novo)}</span>", unsafe_allow_html=True)
+                        with cl3:
+                            if impacto_loggi > 0:
+                                st.metric("Impacto Financeiro Loggi", formatar_moeda(impacto_loggi), f"+{formatar_moeda(impacto_loggi)} (Aumento de custo)", delta_color="inverse")
+                                st.markdown(f"<span style='font-size: 0.9em; color: #ff4b4b; font-weight: bold;'>▲ +{perc_impacto_loggi:.2f}% de impacto no budget</span>", unsafe_allow_html=True)
+                            elif impacto_loggi < 0:
+                                st.metric("Impacto Financeiro Loggi", formatar_moeda(impacto_loggi), f"{formatar_moeda(impacto_loggi)} (Economia)", delta_color="normal")
+                                st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▼ {perc_impacto_loggi:.2f}% de economia no budget</span>", unsafe_allow_html=True)
                             else:
-                                st.metric("Impacto Financeiro", "R$ 0,00", "Neutro")
+                                st.metric("Impacto Financeiro Loggi", "R$ 0,00", "Neutro")
                                 st.markdown(f"<span style='font-size: 0.9em; color: gray;'>0.00%</span>", unsafe_allow_html=True)
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+
+                        # --- DETALHAMENTO POR REGIÃO ---
+                        if detalhes_regioes:
+                            st.markdown("#### 🔍 Detalhamento das Regiões Afetadas")
+                            st.markdown("Veja abaixo o impacto financeiro isolado para cada Região de Preço que sofreu movimentação de cidades ou reajuste comercial.")
                             
+                            for reg, dados in detalhes_regioes.items():
+                                st.markdown(f"##### 📍 {reg}")
+                                cd1, cd2, cd3 = st.columns(3)
+                                tk_r_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
+                                tk_r_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
+                                imp_r = dados['custo_novo'] - dados['custo_antigo']
+                                perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
+                                
+                                with cd1:
+                                    st.markdown(f"**Custo Antigo:** {formatar_moeda(dados['custo_antigo'])}")
+                                    st.markdown(f"<span style='font-size: 0.8em; color: gray;'>Vol: {int(dados['vol']):,} | Tk: {formatar_moeda(tk_r_ant)}</span>", unsafe_allow_html=True)
+                                with cd2:
+                                    st.markdown(f"**Novo Custo:** {formatar_moeda(dados['custo_novo'])}")
+                                    st.markdown(f"<span style='font-size: 0.8em; color: gray;'>Vol: {int(dados['vol']):,} | Tk: {formatar_moeda(tk_r_nov)}</span>", unsafe_allow_html=True)
+                                with cd3:
+                                    color = "gray"
+                                    if imp_r > 0: color = "#ff4b4b"
+                                    elif imp_r < 0: color = "#09ab3b"
+                                    st.markdown(f"**Variação:** <span style='color: {color}; font-weight: bold;'>{formatar_moeda(imp_r)} ({perc_r:+.2f}%)</span>", unsafe_allow_html=True)
+                                st.markdown("<br>", unsafe_allow_html=True)
+
                         with st.expander("🤔 Detalhes do Cálculo & Proporção das Tabelas", expanded=False):
                             st.markdown("Baixe o memorial descritivo completo para ver exatamente os volumes utilizados, os reajustes comerciais (se houver) e a aplicação da curva padrão nas 23 faixas.")
                             st.download_button(
