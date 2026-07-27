@@ -126,9 +126,18 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             
             df_price_var_clean = processar_price_var(df_price_var_raw)
             
-        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns or 'Cidade' not in df_volume.columns:
-            st.error("🚨 **Colunas ausentes no arquivo de Volume!**")
+        # VALIDAÇÃO DE SEGURANÇA APRIMORADA
+        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
+            st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
+            st.markdown("Mesmo com as traduções, as colunas fundamentais não foram encontradas.")
             st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
+            st.stop()
+            
+        if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
+            st.error("🚨 **Atenção: Base de Volume Desatualizada!**")
+            st.markdown("Parece que você fez o upload de uma **versão antiga** da base de volume (sem as colunas `Cidade` e/ou `Faixa pesos`). Lembra que incluímos essas colunas no Looker para conseguir calcular o **Impacto Financeiro** de maneira cirúrgica por município? 😉")
+            st.markdown("**Como resolver:** Clique no 'X' no arquivo de Volume atual na barra lateral e faça o upload da base mais recente.")
+            st.info(f"📋 **Colunas que o app encontrou no seu arquivo atual:** `{list(df_volume.columns)}`")
             st.stop()
             
         with st.spinner("Finalizando processamento..."):
@@ -419,7 +428,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         col1.metric("Custo Anterior (Cidades Movidas)", formatar_moeda(custo_anterior_total))
                         col2.metric("Novo Custo Projetado", formatar_moeda(custo_novo_total))
                         
-                        # Formata o impacto para ficar bonito (verde/vermelho)
                         if impacto_financeiro > 0:
                             col3.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"+{formatar_moeda(impacto_financeiro)} (Aumento de custo)", delta_color="inverse")
                         elif impacto_financeiro < 0:
