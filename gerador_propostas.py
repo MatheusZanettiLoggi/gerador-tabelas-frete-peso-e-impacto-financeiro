@@ -205,6 +205,11 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
     add_line("3. DETALHAMENTO POR REGIAO", bold=True, size=11)
     for reg, dados in detalhes_reg.items():
         add_line(f"Regiao: {reg}", bold=True)
+        
+        ajuste = dados.get('ajuste', 0.0)
+        if ajuste != 0.0:
+            add_line(f"  - Ajuste Comercial Aplicado: {ajuste:+.2f}%")
+            
         tk_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
         tk_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
         imp_r = dados['custo_novo'] - dados['custo_antigo']
@@ -802,7 +807,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 detalhes_regioes[regiao] = {
                                     'vol': reg_vol_antigo_loggi,
                                     'custo_antigo': reg_custo_antigo_loggi,
-                                    'custo_novo': reg_custo_novo_loggi
+                                    'custo_novo': reg_custo_novo_loggi,
+                                    'ajuste': ajuste_perc
                                 }
                                 texto_explicativo.append("\n")
 
@@ -866,7 +872,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     detalhes_regioes[regiao] = {
                                         'vol': reg_vol_antigo_loggi,
                                         'custo_antigo': reg_custo_antigo_loggi,
-                                        'custo_novo': reg_custo_novo_loggi
+                                        'custo_novo': reg_custo_novo_loggi,
+                                        'ajuste': ajuste_perc
                                     }
                             
                             df_regiao_tabela = df_regiao_tabela[['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']]
@@ -967,6 +974,9 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             
                             for reg, dados in detalhes_regioes.items():
                                 st.markdown(f"##### 📍 {reg}")
+                                ajuste_aplicado = dados.get('ajuste', 0.0)
+                                if ajuste_aplicado != 0.0:
+                                    st.markdown(f"<span style='font-size: 0.9em; color: #e67e22; font-weight: bold;'>⚠️ Ajuste Comercial Aplicado: {ajuste_aplicado:+.2f}%</span>", unsafe_allow_html=True)
                                 cd1, cd2, cd3 = st.columns(3)
                                 tk_r_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
                                 tk_r_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
