@@ -1,3 +1,17 @@
+Adicionar a exportação em PDF é o toque final perfeito para tornar o aplicativo uma ferramenta executiva completa. Isso permite que a sua equipe documente as simulações e leve um "Resumo Executivo" para reuniões de aprovação com a liderança.
+
+Para gerar arquivos PDF nativamente em Python, **você precisará instalar uma biblioteca chamada `fpdf` no seu ambiente**.
+
+Abra o seu terminal (ou prompt de comando) e digite:
+
+```bash
+pip install fpdf
+
+```
+
+Após instalar a biblioteca, substitua todo o conteúdo do seu arquivo `gerador_propostas.py` pelo código abaixo. O aplicativo agora vai checar se o `fpdf` está instalado e, se estiver, vai liberar uma terceira coluna na etapa final com o botão **"Baixar Relatório (PDF)"** contendo o resumo exato de todas as volumetrias, faturamentos, tickets médios e as variações de cada região.
+
+```python
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -5,6 +19,13 @@ import re
 import os
 import io
 import unicodedata
+
+# Tenta importar a biblioteca de PDF
+try:
+    from fpdf import FPDF
+    HAS_FPDF = True
+except ImportError:
+    HAS_FPDF = False
 
 st.set_page_config(page_title="Gerador de Propostas - Leves", layout="wide")
 
@@ -115,6 +136,62 @@ def extrair_estado(nome_leve):
     if match:
         return match.group(1)
     return None
+
+def create_pdf_report(nome_destino, estrategia, 
+                      fat_antigo, vol_fat_antigo, tk_fat_antigo,
+                      fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
+                      loggi_antigo, vol_loggi, tk_loggi_antigo,
+                      loggi_novo, tk_loggi_novo, imp_loggi, perc_imp_loggi,
+                      detalhes_reg):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=10)
+    
+    def add_line(text, bold=False, size=10, align='L'):
+        pdf.set_font("Arial", 'B' if bold else '', size)
+        # Remove caracteres problemáticos para o gerador de PDF
+        safe_text = unicodedata.normalize('NFKD', str(text)).encode('ascii', 'ignore').decode('ascii')
+        pdf.multi_cell(0, 6, safe_text, align=align)
+        
+    add_line("RELATORIO DE SIMULACAO - MOVIMENTACAO DE LEVES", bold=True, size=14, align='C')
+    pdf.ln(5)
+    
+    add_line(f"Destino: {nome_destino}", bold=True, size=11)
+    add_line(f"Estrategia Escolhida: {estrategia}", size=11)
+    pdf.ln(5)
+    
+    # Visão Parceiro
+    add_line("1. VISAO DO PARCEIRO (Faturamento do Leve)", bold=True, size=12)
+    add_line(f"Faturamento Atual: {formatar_moeda(fat_antigo)} (Vol: {int(vol_fat_antigo)} | TK: {formatar_moeda(tk_fat_antigo)})")
+    add_line(f"Novo Faturamento Projetado: {formatar_moeda(fat_novo)} (Vol: {int(vol_fat_novo)} | TK: {formatar_moeda(tk_fat_novo)})")
+    add_line(f"Variacao da Operacao: {formatar_moeda(cresc_fat)} ({perc_cresc:+.2f}%)")
+    pdf.ln(5)
+    
+    # Visão Loggi
+    add_line("2. VISAO LOGGI (Impacto Financeiro Real)", bold=True, size=12)
+    add_line(f"Custo Antigo Global: {formatar_moeda(loggi_antigo)} (Vol: {int(vol_loggi)} | TK: {formatar_moeda(tk_loggi_antigo)})")
+    add_line(f"Novo Custo Global Projetado: {formatar_moeda(loggi_novo)} (Vol: {int(vol_loggi)} | TK: {formatar_moeda(tk_loggi_novo)})")
+    add_line(f"Impacto Financeiro: {formatar_moeda(imp_loggi)} ({perc_imp_loggi:+.2f}%)")
+    pdf.ln(5)
+    
+    # Detalhamento
+    add_line("3. DETALHAMENTO POR REGIAO", bold=True, size=12)
+    for reg, dados in detalhes_reg.items():
+        add_line(f"Regiao: {reg}", bold=True)
+        tk_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
+        tk_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
+        imp_r = dados['custo_novo'] - dados['custo_antigo']
+        perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
+        
+        add_line(f"  - Custo Antigo: {formatar_moeda(dados['custo_antigo'])} (TK: {formatar_moeda(tk_ant)})")
+        add_line(f"  - Novo Custo: {formatar_moeda(dados['custo_novo'])} (TK: {formatar_moeda(tk_nov)})")
+        add_line(f"  - Variacao: {formatar_moeda(imp_r)} ({perc_r:+.2f}%)")
+        pdf.ln(2)
+        
+    pdf_out = pdf.output(dest="S")
+    if isinstance(pdf_out, str):
+        return pdf_out.encode("latin-1")
+    return bytes(pdf_out)
 
 # --- FLUXO PRINCIPAL ---
 df_price_var_raw = load_local_excel("Price variation.xlsx")
@@ -881,7 +958,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                         st.divider()
                         
-                        col_dw1, col_down2 = st.columns(2)
+                        col_dw1, col_down2, col_down3 = st.columns(3)
                         with col_dw1:
                             st.markdown("### 📥 Download da Proposta Final")
                             st.markdown("Proposta a ser apresentada ao Leve / Lead")
@@ -925,6 +1002,31 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     type="secondary"
                                 )
+                                
+                        with col_down3:
+                            st.markdown("### 📄 Relatório Executivo")
+                            st.markdown("Resumo executivo do simulador para apresentação.")
+                            
+                            if HAS_FPDF:
+                                pdf_data = create_pdf_report(
+                                    nome_destino_final, estrategia_preco,
+                                    global_custo_destino_original, global_vol_destino_original, tk_parceiro_antigo,
+                                    global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_crescimento,
+                                    custo_loggi_antigo, vol_loggi_total, tk_loggi_antigo,
+                                    global_custo_novo_total, tk_loggi_novo, impacto_loggi, perc_impacto_loggi,
+                                    detalhes_regioes
+                                )
+                                st.download_button(
+                                    label="Baixar Relatório (PDF)",
+                                    data=pdf_data,
+                                    file_name=f"Relatorio_Simulacao_{nome_destino_final.replace(' ', '_')}.pdf",
+                                    mime="application/pdf",
+                                    type="secondary"
+                                )
+                            else:
+                                st.warning("Instale a biblioteca 'fpdf' (pip install fpdf) para liberar a exportação em PDF.")
 
 else:
     st.info("Por favor, faça o upload de **todas as 4 bases** na barra lateral para prosseguir.")
+
+```
