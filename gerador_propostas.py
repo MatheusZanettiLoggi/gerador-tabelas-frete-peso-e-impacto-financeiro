@@ -45,11 +45,6 @@ def load_local_excel(filename):
     return pd.read_excel(filename)
 
 def padronizar_colunas_volume(df):
-    """
-    Padroniza as colunas do Looker, independentemente da opção de download escolhida
-    ('With visualization options applied' ou 'As displayed in the data table').
-    """
-    # Mapeamento direto (Nomes brutos do Looker -> Nomes utilizados no código)
     mapa_colunas = {
         "Package Charge Leve Last Mile Company Name": "Leve",
         "Distribution and Expedition Center Locations Routing Code": "Routing Code",
@@ -60,10 +55,8 @@ def padronizar_colunas_volume(df):
         "Package Destination City": "Cidade"
     }
     
-    # Aplica a renomeação se as colunas com nomes brutos existirem
     df = df.rename(columns=mapa_colunas)
     
-    # Fallback de segurança (caso venha com algum outro sufixo inesperado)
     renames_fallback = {}
     for col in df.columns:
         col_str = str(col)
@@ -131,16 +124,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_abrangencia = load_data(file_abrangencia)
             df_slos = load_data(file_slos)
             
-            # Carrega e imediatamente padroniza as colunas do volume
             df_volume = load_data(file_volume)
             df_volume = padronizar_colunas_volume(df_volume)
             
             df_price_var_clean = processar_price_var(df_price_var_raw)
             
-        # VALIDAÇÃO DE SEGURANÇA
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
             st.error("🚨 **Colunas ausentes no arquivo de Volume!**")
-            st.markdown("Mesmo com o dicionário de tradução, as colunas necessárias não foram encontradas.")
             st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
             st.stop()
             
@@ -233,7 +223,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         col_ab = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
                         st.dataframe(df_abrangencia_leve[[c for c in col_ab if c in df_abrangencia_leve.columns]], use_container_width=True, hide_index=True)
     
-            # --- FASE 3: DEFINIÇÃO DE DESTINO E MOVIMENTAÇÃO ---
             with st.expander("5. Definição do Leve/Lead de Destino", expanded=True):
                 tipo_destino = st.radio("O destino da movimentação será para:", ["Um Leve Existente (já selecionado)", "Um Novo Lead"])
                 
@@ -259,7 +248,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
     
             if nome_destino_final and cidade_base_destino:
                 with st.expander("6. Manipulação de Abrangência (Tabela Interativa)", expanded=True):
-                    st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir. Você pode arrastar/copiar o valor para várias células.")
+                    st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir.")
                     
                     df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
                     df_movimentacao = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].copy()
@@ -291,7 +280,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     else:
                         st.success(f"{len(df_movidos)} município(s) movimentado(s) para **{nome_destino_final}**!")
                         
-                        # --- CÁLCULO DA NOVA ABRANGÊNCIA E SLO LOCAL ---
                         slo_base_dest = df_slos_clean[df_slos_clean['Cidade'] == cidade_base_destino]['SLO'].values
                         slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
                         
@@ -303,18 +291,20 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_nova_abrangencia.rename(columns={'LMC Name': 'LMC Name (Origem)'}, inplace=True)
                         colunas_finais_abrangencia = ['Região de preço', 'Cidade', 'State', 'Novo SLO Local', 'LMC Name (Origem)']
                         
-                        # --- CÁLCULO DA NOVA TABELA FRETE PESO ---
+                        # --- CÁLCULO DA NOVA TABELA FRETE PESO AJUSTADO ---
                         regioes_movimentadas = df_nova_abrangencia['Região de preço'].unique()
                         lista_novas_tabelas = []
                         
                         for regiao in regioes_movimentadas:
-                            leves_origem = df_nova_abrangencia[df_nova_abrangencia['Região de preço'] == regiao]['LMC Name (Origem)'].unique()
+                            # AQUI ESTAVA O ERRO! Precisamos de todos os Leves que atendem essa região
+                            # e foram selecionados na etapa 2, não apenas os que cederam cidades
+                            leves_para_media = [leve for leve in leves_selecionados if leve in df_abrangencia[df_abrangencia['Região de preço'] == regiao]['LMC Name'].values]
                             
                             soma_produto_on_time = 0
                             soma_produto_out_time = 0
                             soma_volumes = 0
                             
-                            for leve_origem in leves_origem:
+                            for leve_origem in leves_para_media:
                                 if "Faixa pesos" in df_volume.columns:
                                     vol_data = df_volume[(df_volume['Leve'] == leve_origem) & 
                                                          (df_volume['Region label'] == regiao) & 
@@ -364,10 +354,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
                         st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
 
-                        # --- BOTÃO DE DOWNLOAD EXCEL (OBJETIVO 4) ---
                         st.divider()
                         st.markdown("### 📥 Download da Proposta")
-                        st.markdown("Faça o download das tabelas geradas acima em formato Excel para envio/apresentação.")
                         
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
