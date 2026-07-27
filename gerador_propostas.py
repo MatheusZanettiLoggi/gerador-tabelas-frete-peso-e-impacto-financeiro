@@ -259,16 +259,54 @@ if file_frete and file_abrangencia and file_slos and file_volume:
     
             if nome_destino_final and cidade_base_destino:
                 with st.expander("6. Manipulação de Abrangência (Tabela Interativa)", expanded=True):
-                    st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir.")
                     
-                    df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
-                    df_movimentacao = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].copy()
-                    df_movimentacao['Destino'] = "Manter no Leve Atual"
+                    # Garantir que a tabela interativa inicie ou reinicie corretamente no State
+                    config_key = f"{','.join(leves_selecionados)}_{nome_destino_final}"
+                    if "mov_config_key" not in st.session_state or st.session_state.mov_config_key != config_key:
+                        df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
+                        df_mov = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].copy()
+                        df_mov['Destino'] = "Manter no Leve Atual"
+                        st.session_state.df_movimentacao = df_mov
+                        st.session_state.mov_config_key = config_key
+
+                    # Controles de Movimentação em Massa
+                    st.markdown("⚡ **Ações em Massa (Mover vários municípios de uma vez)**")
+                    col_m1, col_m2, col_m3, col_m4 = st.columns([2.5, 2.5, 2, 2])
+                    
+                    with col_m1:
+                        bulk_lmc = st.selectbox("1. Filtrar por Leve de Origem:", ["Selecione..."] + leves_selecionados, key="bulk_lmc")
+                    with col_m2:
+                        opcoes_reg = ["Todas as Regiões"]
+                        if bulk_lmc != "Selecione...":
+                            opcoes_reg += sorted(list(st.session_state.df_movimentacao[st.session_state.df_movimentacao['LMC Name'] == bulk_lmc]['Região de preço'].unique()))
+                        bulk_reg = st.selectbox("2. Filtrar por Região:", opcoes_reg, key="bulk_reg")
+                    
+                    with col_m3:
+                        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+                        def aplicar_em_massa():
+                            l = st.session_state.bulk_lmc
+                            r = st.session_state.bulk_reg
+                            if l != "Selecione...":
+                                mask = st.session_state.df_movimentacao['LMC Name'] == l
+                                if r != "Todas as Regiões":
+                                    mask &= st.session_state.df_movimentacao['Região de preço'] == r
+                                st.session_state.df_movimentacao.loc[mask, 'Destino'] = nome_destino_final
+                        st.button("Aplicar Destino", on_click=aplicar_em_massa, type="secondary", use_container_width=True)
+                        
+                    with col_m4:
+                        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+                        def resetar_massa():
+                            st.session_state.df_movimentacao['Destino'] = "Manter no Leve Atual"
+                        st.button("🔄 Resetar Tudo", on_click=resetar_massa, use_container_width=True)
+
+                    st.divider()
+                    st.markdown("🖱️ **Seleção Manual (Município a Município)**")
+                    st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir.")
                     
                     opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
                     
                     df_editado = st.data_editor(
-                        df_movimentacao,
+                        st.session_state.df_movimentacao,
                         column_config={
                             "Destino": st.column_config.SelectboxColumn(
                                 "Destino (Clique para alterar)",
@@ -283,6 +321,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         height=400
                     )
                     
+                    # Atualiza o state com as edições manuais
+                    st.session_state.df_movimentacao = df_editado
                     df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
 
                 with st.expander("7. Estratégia de Precificação da Proposta", expanded=True):
@@ -334,7 +374,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     regioes_finais_destino = df_escopo_final['Região de preço'].unique()
                     regioes_movimentadas = df_movidos['Região de preço'].unique()
 
-                    # --- GESTÃO DE ESTADO (SESSION STATE) PARA OS AJUSTES ---
+                    # --- GESTÃO DE ESTADO PARA OS AJUSTES ---
                     for regiao in regioes_finais_destino:
                         if f"ajuste_{regiao}" not in st.session_state:
                             st.session_state[f"ajuste_{regiao}"] = 0.0
@@ -376,6 +416,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         st.success(f"Proposta gerada para **{nome_destino_final}**!")
                         
                         lista_novas_tabelas = []
+                        registros_auditoria = [] # <-- Aqui guardaremos a linha a linha para o Excel Analítico
                         texto_explicativo = []
                         texto_explicativo.append(f"=== MEMORIAL DE CÁLCULO - PROPOSTA FRETE PESO ===\n")
                         texto_explicativo.append(f"Destino: {nome_destino_final}")
@@ -402,7 +443,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     custo_alvo_out = 0
                                     soma_vol_mult = 0
                                     
-                                    # Cria dicionário de multiplicadores para acesso rápido
                                     mult_dict = dict(zip(df_price_var_clean['Faixa de peso (g/m³)'], df_price_var_clean['Multiplicador']))
                                     
                                     texto_explicativo.append(">> PASSO 1: Levantamento do Custo Antigo Global e Pesos (Análise de todas as 23 faixas)\n")
@@ -537,6 +577,20 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         reg_custo_antigo_loggi += (qtd_pacotes * preco_antigo)
                                         reg_custo_novo_loggi += (qtd_pacotes * preco_novo)
                                         
+                                        registros_auditoria.append({
+                                            'Tipo': 'Cidades Migradas (Origem)',
+                                            'LMC Atual / Origem': leve_orig,
+                                            'Região de Preço': regiao,
+                                            'Cidade': str(cid_movida).title(),
+                                            'Faixa de Peso': faixa_peso,
+                                            'Pacotes (30 dias)': qtd_pacotes,
+                                            'Tarifa Antiga': preco_antigo,
+                                            'Tarifa Nova Projetada': preco_novo,
+                                            'Custo Antigo Total': qtd_pacotes * preco_antigo,
+                                            'Novo Custo Total': qtd_pacotes * preco_novo,
+                                            'Diferença (R$)': (qtd_pacotes * preco_novo) - (qtd_pacotes * preco_antigo)
+                                        })
+                                        
                                 if tipo_destino == "Um Leve Existente (já selecionado)":
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
                                     for _, row in cidades_exist.iterrows():
@@ -560,6 +614,20 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             reg_vol_antigo_loggi += qtd_pacotes
                                             reg_custo_antigo_loggi += (qtd_pacotes * preco_antigo)
                                             reg_custo_novo_loggi += (qtd_pacotes * preco_novo)
+                                            
+                                            registros_auditoria.append({
+                                                'Tipo': 'Cidades Atuais do Destino',
+                                                'LMC Atual / Origem': nome_destino_final,
+                                                'Região de Preço': regiao,
+                                                'Cidade': str(cid_ext).title(),
+                                                'Faixa de Peso': faixa_peso,
+                                                'Pacotes (30 dias)': qtd_pacotes,
+                                                'Tarifa Antiga': preco_antigo,
+                                                'Tarifa Nova Projetada': preco_novo,
+                                                'Custo Antigo Total': qtd_pacotes * preco_antigo,
+                                                'Novo Custo Total': qtd_pacotes * preco_novo,
+                                                'Diferença (R$)': (qtd_pacotes * preco_novo) - (qtd_pacotes * preco_antigo)
+                                            })
                                 
                                 detalhes_regioes[regiao] = {
                                     'vol': reg_vol_antigo_loggi,
@@ -608,6 +676,20 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             reg_custo_antigo_loggi += (qtd_pacotes * preco_antigo)
                                             reg_custo_novo_loggi += (qtd_pacotes * preco_novo)
                                             
+                                            registros_auditoria.append({
+                                                'Tipo': 'Cidades Atuais do Destino',
+                                                'LMC Atual / Origem': nome_destino_final,
+                                                'Região de Preço': regiao,
+                                                'Cidade': str(cid_ext).title(),
+                                                'Faixa de Peso': faixa_peso,
+                                                'Pacotes (30 dias)': qtd_pacotes,
+                                                'Tarifa Antiga': preco_antigo,
+                                                'Tarifa Nova Projetada': preco_novo,
+                                                'Custo Antigo Total': qtd_pacotes * preco_antigo,
+                                                'Novo Custo Total': qtd_pacotes * preco_novo,
+                                                'Diferença (R$)': (qtd_pacotes * preco_novo) - (qtd_pacotes * preco_antigo)
+                                            })
+                                            
                                 if ajuste_perc != 0.0:
                                     detalhes_regioes[regiao] = {
                                         'vol': reg_vol_antigo_loggi,
@@ -620,6 +702,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
                         texto_completo_memorial = "\n".join(texto_explicativo)
+                        df_auditoria_excel = pd.DataFrame(registros_auditoria)
 
                         # --- ALERTAS DE MISROUTES / PACOTES IGNORADOS ---
                         ignorado_info = []
@@ -753,20 +836,38 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
 
                         st.divider()
-                        st.markdown("### 📥 Download da Proposta Final")
                         
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                            df_escopo_final[colunas_finais_abrangencia].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
-                            df_exibicao_tabela.to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
-                        
-                        st.download_button(
-                            label="Baixar Proposta em Excel",
-                            data=output.getvalue(),
-                            file_name=f"Proposta_Movimentacao_{nome_destino_final.replace(' ', '_')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            type="primary"
-                        )
+                        col_dw1, col_down2 = st.columns(2)
+                        with col_dw1:
+                            st.markdown("### 📥 Download da Proposta Final")
+                            st.markdown("A proposta consolidada pronta para assinatura.")
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                df_escopo_final[colunas_finais_abrangencia].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
+                                df_exibicao_tabela.to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
+                            
+                            st.download_button(
+                                label="Baixar Proposta em Excel",
+                                data=output.getvalue(),
+                                file_name=f"Proposta_Movimentacao_{nome_destino_final.replace(' ', '_')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                type="primary"
+                            )
+                            
+                        with col_down2:
+                            if not df_auditoria_excel.empty:
+                                st.markdown("### 📊 Download do Detalhamento")
+                                st.markdown("Planilha detalhada pacote a pacote para análise da gerência.")
+                                output_det = io.BytesIO()
+                                with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
+                                    df_auditoria_excel.to_excel(writer, sheet_name='Detalhamento Impacto', index=False)
+                                st.download_button(
+                                    label="Baixar Detalhes do Cálculo (.xlsx)",
+                                    data=output_det.getvalue(),
+                                    file_name=f"Detalhamento_Calculo_{nome_destino_final.replace(' ', '_')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    type="secondary"
+                                )
 
 else:
     st.info("Por favor, faça o upload de **todas as 4 bases** na barra lateral para prosseguir.")
