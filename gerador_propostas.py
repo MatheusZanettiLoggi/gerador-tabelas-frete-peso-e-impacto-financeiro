@@ -904,9 +904,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 st.markdown("Planilha detalhando com os cálculos e impactos")
                                 
                                 df_resumo = pd.DataFrame({
-                                    'Custo Antigo Total': [custo_loggi_antigo],
-                                    'Custo Novo Total': [global_custo_novo_total],
-                                    'Diferença (R$)': [impacto_loggi]
+                                    'Custo Antigo Global (R$)': [custo_loggi_antigo],
+                                    'Novo Custo Global Projetado (R$)': [global_custo_novo_total],
+                                    'Diferença (R$)': [impacto_loggi],
+                                    'Volumetria Total (Pacotes)': [vol_loggi_total],
+                                    'Ticket Médio Antigo (R$)': [tk_loggi_antigo],
+                                    'Ticket Médio Novo (R$)': [tk_loggi_novo],
+                                    'Impacto no Budget (%)': [perc_impacto_loggi / 100]
                                 })
                                 
                                 output_det = io.BytesIO()
