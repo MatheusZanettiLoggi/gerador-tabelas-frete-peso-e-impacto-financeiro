@@ -398,11 +398,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             
                             if regiao in regioes_movimentadas:
                                 if estrategia_preco == "Gerar Tabela Equivalente (Focada em manter Impacto Neutro)":
-                                    soma_produto_on_time = 0
-                                    soma_produto_out_time = 0
-                                    soma_volumes = 0
+                                    custo_alvo_on = 0
+                                    custo_alvo_out = 0
+                                    soma_vol_mult = 0
                                     
-                                    texto_explicativo.append(">> PASSO 1: Somatório de Volumes (Apenas Faixa 1: 0 a 300g)\n")
+                                    # Cria dicionário de multiplicadores para acesso rápido
+                                    mult_dict = dict(zip(df_price_var_clean['Faixa de peso (g/m³)'], df_price_var_clean['Multiplicador']))
+                                    
+                                    texto_explicativo.append(">> PASSO 1: Levantamento do Custo Antigo Global e Pesos (Análise de todas as 23 faixas)\n")
                                     texto_explicativo.append("Cidades Migradas (Origem):")
                                     
                                     for _, row in cidades_mov_regiao.iterrows():
@@ -410,22 +413,30 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         cidade_movida = row['Cidade']
                                         
                                         vol_data = df_volume[(df_volume['Leve'] == leve_origem) & 
-                                                             (df_volume['Cidade_Normalizada'] == normalize_string(cidade_movida)) & 
-                                                             (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
-                                        volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
+                                                             (df_volume['Cidade_Normalizada'] == normalize_string(cidade_movida))]
                                         
-                                        frete_data = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao)]
-                                        faixa1 = frete_data[frete_data['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
+                                        vol_cidade = 0
+                                        custo_cidade = 0
                                         
-                                        preco_on = faixa1['on time amount'].values[0] if not faixa1.empty else 0
-                                        preco_out = faixa1['out of time amount'].values[0] if not faixa1.empty else 0
+                                        for _, v_row in vol_data.iterrows():
+                                            fx = v_row['Faixa pesos']
+                                            qtd = v_row['# Total Packages']
                                             
-                                        peso_calc = volume if volume > 0 else 1
-                                        soma_produto_on_time += (preco_on * peso_calc)
-                                        soma_produto_out_time += (preco_out * peso_calc)
-                                        soma_volumes += peso_calc
-                                        
-                                        texto_explicativo.append(f" - {str(cidade_movida).title()} ({leve_origem}): {volume} pct x {formatar_moeda(preco_on)} = {formatar_moeda(volume * preco_on)}")
+                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == fx)]
+                                            preco_on = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
+                                            preco_out = tb_antiga['out of time amount'].values[0] if not tb_antiga.empty else 0
+                                            
+                                            mult = mult_dict.get(fx, 1.0)
+                                            
+                                            custo_alvo_on += qtd * preco_on
+                                            custo_alvo_out += qtd * preco_out
+                                            soma_vol_mult += qtd * mult
+                                            
+                                            vol_cidade += qtd
+                                            custo_cidade += qtd * preco_on
+                                            
+                                        if vol_cidade > 0:
+                                            texto_explicativo.append(f" - {str(cidade_movida).title()} ({leve_origem}): {int(vol_cidade)} pct | Custo Atual: {formatar_moeda(custo_cidade)}")
                                     
                                     if tipo_destino == "Um Leve Existente (já selecionado)":
                                         texto_explicativo.append("\nCidades Atuais do Destino:")
@@ -434,29 +445,37 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         for _, row in cidades_exist.iterrows():
                                             cid_ext = row['Cidade']
                                             vol_dest_data = df_volume[(df_volume['Leve'] == nome_destino_final) & 
-                                                                      (df_volume['Cidade_Normalizada'] == normalize_string(cid_ext)) & 
-                                                                      (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
-                                            volume_dest = vol_dest_data['# Total Packages'].sum() if not vol_dest_data.empty else 0
+                                                                      (df_volume['Cidade_Normalizada'] == normalize_string(cid_ext))]
                                             
-                                            if volume_dest > 0:
-                                                frete_dest = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao)]
-                                                faixa1_dest = frete_dest[frete_dest['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
+                                            vol_cidade = 0
+                                            custo_cidade = 0
+                                            for _, v_row in vol_dest_data.iterrows():
+                                                fx = v_row['Faixa pesos']
+                                                qtd = v_row['# Total Packages']
                                                 
-                                                preco_dest_on = faixa1_dest['on time amount'].values[0] if not faixa1_dest.empty else 0
-                                                preco_dest_out = faixa1_dest['out of time amount'].values[0] if not faixa1_dest.empty else 0
+                                                tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == fx)]
+                                                preco_on = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
+                                                preco_out = tb_antiga['out of time amount'].values[0] if not tb_antiga.empty else 0
                                                 
-                                                soma_produto_on_time += (preco_dest_on * volume_dest)
-                                                soma_produto_out_time += (preco_dest_out * volume_dest)
-                                                soma_volumes += volume_dest
+                                                mult = mult_dict.get(fx, 1.0)
                                                 
-                                                texto_explicativo.append(f" - {str(cid_ext).title()}: {volume_dest} pct x {formatar_moeda(preco_dest_on)} = {formatar_moeda(volume_dest * preco_dest_on)}")
+                                                custo_alvo_on += qtd * preco_on
+                                                custo_alvo_out += qtd * preco_out
+                                                soma_vol_mult += qtd * mult
+                                                
+                                                vol_cidade += qtd
+                                                custo_cidade += qtd * preco_on
+                                                
+                                            if vol_cidade > 0:
+                                                texto_explicativo.append(f" - {str(cid_ext).title()}: {int(vol_cidade)} pct | Custo Atual: {formatar_moeda(custo_cidade)}")
 
-                                    nova_faixa1_on = soma_produto_on_time / soma_volumes if soma_volumes > 0 else 0
-                                    nova_faixa1_out = soma_produto_out_time / soma_volumes if soma_volumes > 0 else 0
+                                    base_on = custo_alvo_on / soma_vol_mult if soma_vol_mult > 0 else 0
+                                    base_out = custo_alvo_out / soma_vol_mult if soma_vol_mult > 0 else 0
                                     
-                                    texto_explicativo.append(f"\n>> PASSO 2: Preço Equivalente (Faixa 1)")
-                                    texto_explicativo.append(f"Custo Total Somado / Total Pacotes = {formatar_moeda(soma_produto_on_time)} / {soma_volumes}")
-                                    texto_explicativo.append(f"Preço Equivalente Faixa 1: {formatar_moeda(nova_faixa1_on)}")
+                                    texto_explicativo.append(f"\n>> PASSO 2: Cálculo da Base Matemática Ponderada Global")
+                                    texto_explicativo.append(f"Custo Alvo Total (Todas as 23 faixas) = {formatar_moeda(custo_alvo_on)}")
+                                    texto_explicativo.append(f"Fator de Volume Ponderado (Soma Vol * Mult) = {soma_vol_mult:.2f}")
+                                    texto_explicativo.append(f"Base de Cálculo (Índice 1.00) = Custo Alvo / Fator = {formatar_moeda(base_on)}")
                                     
                                 else:
                                     frete_base = df_frete_clean[(df_frete_clean['LMC name'] == tabela_base_selecionada) & (df_frete_clean['label'] == regiao)]
@@ -466,12 +485,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     
                                     texto_explicativo.append(f">> Tabela Existente Selecionada: {tabela_base_selecionada}")
                                     texto_explicativo.append(f"Valor copiado da Faixa 1: {formatar_moeda(nova_faixa1_on)}")
-                                
-                                base_on = nova_faixa1_on / 0.83
-                                base_out = nova_faixa1_out / 0.83
+                                    
+                                    base_on = nova_faixa1_on / 0.83
+                                    base_out = nova_faixa1_out / 0.83
                                 
                                 texto_explicativo.append(f"\n>> PASSO 3: Geração das 23 Faixas")
-                                texto_explicativo.append(f"Base de Cálculo (Índice 1.00) = Faixa 1 / 0.83 = {formatar_moeda(base_on)}\n")
                                 
                                 df_regiao_tabela = df_price_var_clean.copy()
                                 df_regiao_tabela['Região de Preço'] = regiao
@@ -714,7 +732,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 st.markdown("<br>", unsafe_allow_html=True)
 
                         with st.expander("🤔 Detalhes do Cálculo & Proporção das Tabelas", expanded=False):
-                            st.markdown("Baixe o memorial descritivo completo para ver exatamente os volumes utilizados, os reajustes comerciais (se houver) e a aplicação da curva padrão nas 23 faixas.")
+                            st.markdown("O aplicativo agora avalia o volume completo nas 23 faixas de peso simultaneamente e encontra matematicamente o multiplicador base perfeito que zera o impacto financeiro na geração de tabelas equivalentes. Qualquer variação visível (de poucos centavos) ocorre apenas por arredondamento matemático de casas decimais.")
                             st.download_button(
                                 label="📄 Baixar Memorial de Cálculo (.txt)",
                                 data=texto_completo_memorial,
