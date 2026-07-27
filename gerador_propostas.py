@@ -131,7 +131,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_volume = load_data(file_volume)
             df_volume = padronizar_colunas_volume(df_volume)
             
-            # Aplica a normalização de Strings para cruzar cidades com segurança
             df_volume['Cidade_Normalizada'] = df_volume['Cidade'].apply(normalize_string)
             df_abrangencia['Cidade_Normalizada'] = df_abrangencia['Cidade'].apply(normalize_string)
             
@@ -260,7 +259,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             if nome_destino_final and cidade_base_destino:
                 with st.expander("6. Manipulação de Abrangência (Tabela Interativa)", expanded=True):
                     
-                    # Garantir que a tabela interativa inicie ou reinicie corretamente no State
                     config_key = f"{','.join(leves_selecionados)}_{nome_destino_final}"
                     if "mov_config_key" not in st.session_state or st.session_state.mov_config_key != config_key:
                         df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
@@ -269,31 +267,36 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         st.session_state.df_movimentacao = df_mov
                         st.session_state.mov_config_key = config_key
 
-                    # Controles de Movimentação em Massa
+                    opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
+
+                    # --- CONTROLES DE MOVIMENTAÇÃO EM MASSA MELHORADOS ---
                     st.markdown("⚡ **Ações em Massa (Mover vários municípios de uma vez)**")
-                    col_m1, col_m2, col_m3, col_m4 = st.columns([2.5, 2.5, 2, 2])
+                    col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns([2.5, 2.5, 2.5, 1.5, 1.5])
                     
                     with col_m1:
-                        bulk_lmc = st.selectbox("1. Filtrar por Leve de Origem:", ["Selecione..."] + leves_selecionados, key="bulk_lmc")
+                        bulk_lmc = st.selectbox("1. Filtrar por Origem:", ["Selecione..."] + leves_selecionados, key="bulk_lmc")
                     with col_m2:
                         opcoes_reg = ["Todas as Regiões"]
                         if bulk_lmc != "Selecione...":
                             opcoes_reg += sorted(list(st.session_state.df_movimentacao[st.session_state.df_movimentacao['LMC Name'] == bulk_lmc]['Região de preço'].unique()))
                         bulk_reg = st.selectbox("2. Filtrar por Região:", opcoes_reg, key="bulk_reg")
-                    
                     with col_m3:
+                        bulk_dest = st.selectbox("3. Escolher Destino:", opcoes_destino, key="bulk_dest")
+                        
+                    with col_m4:
                         st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
                         def aplicar_em_massa():
                             l = st.session_state.bulk_lmc
                             r = st.session_state.bulk_reg
+                            d = st.session_state.bulk_dest
                             if l != "Selecione...":
                                 mask = st.session_state.df_movimentacao['LMC Name'] == l
                                 if r != "Todas as Regiões":
                                     mask &= st.session_state.df_movimentacao['Região de preço'] == r
-                                st.session_state.df_movimentacao.loc[mask, 'Destino'] = nome_destino_final
-                        st.button("Aplicar Destino", on_click=aplicar_em_massa, type="secondary", use_container_width=True)
+                                st.session_state.df_movimentacao.loc[mask, 'Destino'] = d
+                        st.button("Aplicar Ação", on_click=aplicar_em_massa, type="secondary", use_container_width=True)
                         
-                    with col_m4:
+                    with col_m5:
                         st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
                         def resetar_massa():
                             st.session_state.df_movimentacao['Destino'] = "Manter no Leve Atual"
@@ -301,9 +304,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                     st.divider()
                     st.markdown("🖱️ **Seleção Manual (Município a Município)**")
-                    st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir.")
-                    
-                    opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
+                    st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir de forma manual.")
                     
                     df_editado = st.data_editor(
                         st.session_state.df_movimentacao,
@@ -321,7 +322,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         height=400
                     )
                     
-                    # Atualiza o state com as edições manuais
                     st.session_state.df_movimentacao = df_editado
                     df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
 
@@ -347,7 +347,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 # --- PROCESSAMENTO DOS RESULTADOS ---
                 if not df_movidos.empty:
-                    # PREPARAÇÃO DA ABRANGÊNCIA TOTAL DO DESTINO
                     if tipo_destino == "Um Leve Existente (já selecionado)":
                         df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
                         df_abrangencia_existente['Observação'] = "Abrangência Atual"
@@ -374,7 +373,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     regioes_finais_destino = df_escopo_final['Região de preço'].unique()
                     regioes_movimentadas = df_movidos['Região de preço'].unique()
 
-                    # --- GESTÃO DE ESTADO PARA OS AJUSTES ---
                     for regiao in regioes_finais_destino:
                         if f"ajuste_{regiao}" not in st.session_state:
                             st.session_state[f"ajuste_{regiao}"] = 0.0
@@ -416,7 +414,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         st.success(f"Proposta gerada para **{nome_destino_final}**!")
                         
                         lista_novas_tabelas = []
-                        registros_auditoria = [] # <-- Aqui guardaremos a linha a linha para o Excel Analítico
+                        registros_auditoria = []
                         texto_explicativo = []
                         texto_explicativo.append(f"=== MEMORIAL DE CÁLCULO - PROPOSTA FRETE PESO ===\n")
                         texto_explicativo.append(f"Destino: {nome_destino_final}")
@@ -585,6 +583,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             'Faixa de Peso': faixa_peso,
                                             'Pacotes (30 dias)': qtd_pacotes,
                                             'Tarifa Antiga': preco_antigo,
+                                            'Ajuste Comercial (%)': ajuste_perc / 100,
                                             'Tarifa Nova Projetada': preco_novo,
                                             'Custo Antigo Total': qtd_pacotes * preco_antigo,
                                             'Novo Custo Total': qtd_pacotes * preco_novo,
@@ -623,6 +622,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                                 'Faixa de Peso': faixa_peso,
                                                 'Pacotes (30 dias)': qtd_pacotes,
                                                 'Tarifa Antiga': preco_antigo,
+                                                'Ajuste Comercial (%)': ajuste_perc / 100,
                                                 'Tarifa Nova Projetada': preco_novo,
                                                 'Custo Antigo Total': qtd_pacotes * preco_antigo,
                                                 'Novo Custo Total': qtd_pacotes * preco_novo,
@@ -684,6 +684,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                                 'Faixa de Peso': faixa_peso,
                                                 'Pacotes (30 dias)': qtd_pacotes,
                                                 'Tarifa Antiga': preco_antigo,
+                                                'Ajuste Comercial (%)': ajuste_perc / 100,
                                                 'Tarifa Nova Projetada': preco_novo,
                                                 'Custo Antigo Total': qtd_pacotes * preco_antigo,
                                                 'Novo Custo Total': qtd_pacotes * preco_novo,
@@ -815,7 +816,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 st.markdown("<br>", unsafe_allow_html=True)
 
                         with st.expander("🤔 Detalhes do Cálculo & Proporção das Tabelas", expanded=False):
-                            st.markdown("O aplicativo agora avalia o volume completo nas 23 faixas de peso simultaneamente e encontra matematicamente o multiplicador base perfeito que zera o impacto financeiro na geração de tabelas equivalentes. Qualquer variação visível (de poucos centavos) ocorre apenas por arredondamento matemático de casas decimais.")
+                            st.markdown("O aplicativo avalia o volume completo nas 23 faixas de peso simultaneamente e encontra matematicamente o multiplicador base perfeito que zera o impacto financeiro na geração de tabelas equivalentes.")
                             st.download_button(
                                 label="📄 Baixar Memorial de Cálculo (.txt)",
                                 data=texto_completo_memorial,
@@ -858,9 +859,18 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             if not df_auditoria_excel.empty:
                                 st.markdown("### 📊 Download do Detalhamento")
                                 st.markdown("Planilha detalhada pacote a pacote para análise da gerência.")
+                                
+                                df_resumo = pd.DataFrame({
+                                    'Custo Antigo Total': [custo_loggi_antigo],
+                                    'Custo Novo Total': [global_custo_novo_total],
+                                    'Diferença (R$)': [impacto_loggi]
+                                })
+                                
                                 output_det = io.BytesIO()
                                 with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
-                                    df_auditoria_excel.to_excel(writer, sheet_name='Detalhamento Impacto', index=False)
+                                    df_resumo.to_excel(writer, sheet_name='Detalhamento Impacto', index=False, startrow=0)
+                                    df_auditoria_excel.to_excel(writer, sheet_name='Detalhamento Impacto', index=False, startrow=4)
+                                
                                 st.download_button(
                                     label="Baixar Detalhes do Cálculo (.xlsx)",
                                     data=output_det.getvalue(),
