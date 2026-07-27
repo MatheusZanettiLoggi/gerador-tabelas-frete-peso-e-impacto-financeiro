@@ -54,9 +54,7 @@ def padronizar_colunas_volume(df):
         "Package Charge Leve # Packages": "# Total Packages",
         "Package Destination City": "Cidade"
     }
-    
     df = df.rename(columns=mapa_colunas)
-    
     renames_fallback = {}
     for col in df.columns:
         col_str = str(col)
@@ -72,7 +70,6 @@ def padronizar_colunas_volume(df):
             renames_fallback[col_str] = "Faixa pesos"
         elif "Cidade" not in df.columns and (col_str.endswith("Destination City") or col_str.lower().endswith("cidade")):
             renames_fallback[col_str] = "Cidade"
-            
     return df.rename(columns=renames_fallback)
 
 @st.cache_data
@@ -129,7 +126,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             
             df_price_var_clean = processar_price_var(df_price_var_raw)
             
-        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
+        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns or 'Cidade' not in df_volume.columns:
             st.error("🚨 **Colunas ausentes no arquivo de Volume!**")
             st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
             st.stop()
@@ -271,15 +268,35 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         use_container_width=True,
                         height=400
                     )
-    
-                with st.expander("7. Resultados da Movimentação (Proposta)", expanded=True):
-                    df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
                     
+                    df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
+
+                with st.expander("7. Estratégia de Precificação da Proposta", expanded=True):
                     if df_movidos.empty:
                         st.warning("Nenhum município foi movimentado para o destino ainda.")
                     else:
+                        st.markdown("Como você deseja gerar a nova Tabela Frete Peso para as cidades movidas?")
+                        estrategia_preco = st.radio(
+                            "Escolha a estratégia:", 
+                            ["Gerar Tabela Equivalente (Focada em manter Impacto Neutro)", 
+                             "Utilizar uma Tabela Existente (Manter tabela do destino atual)"]
+                        )
+                        
+                        tabela_base_selecionada = None
+                        if estrategia_preco == "Utilizar uma Tabela Existente (Manter tabela do destino atual)":
+                            if tipo_destino == "Um Leve Existente (já selecionado)":
+                                st.info(f"O sistema utilizará a tabela atual do Leve **{nome_destino_final}** para precificar as cidades absorvidas.")
+                                tabela_base_selecionada = nome_destino_final
+                            else:
+                                nome_base_display = st.selectbox("Qual tabela atual devemos usar como base para o Novo Lead?", leves_selecionados_formatados)
+                                tabela_base_selecionada = mapa_nomes.get(nome_base_display)
+                
+                # --- PROCESSAMENTO DOS RESULTADOS ---
+                if not df_movidos.empty:
+                    with st.expander("8. Resultados e Impacto Financeiro (Proposta)", expanded=True):
                         st.success(f"{len(df_movidos)} município(s) movimentado(s) para **{nome_destino_final}**!")
                         
+                        # --- CÁLCULO DA NOVA ABRANGÊNCIA E SLO LOCAL ---
                         slo_base_dest = df_slos_clean[df_slos_clean['Cidade'] == cidade_base_destino]['SLO'].values
                         slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
                         
@@ -291,47 +308,69 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_nova_abrangencia.rename(columns={'LMC Name': 'LMC Name (Origem)'}, inplace=True)
                         colunas_finais_abrangencia = ['Região de preço', 'Cidade', 'State', 'Novo SLO Local', 'LMC Name (Origem)']
                         
-                        # --- CÁLCULO DA NOVA TABELA FRETE PESO AJUSTADO ---
+                        # --- CÁLCULO DA NOVA TABELA FRETE PESO ---
                         regioes_movimentadas = df_nova_abrangencia['Região de preço'].unique()
                         lista_novas_tabelas = []
                         
                         for regiao in regioes_movimentadas:
-                            # AQUI ESTAVA O ERRO! Precisamos de todos os Leves que atendem essa região
-                            # e foram selecionados na etapa 2, não apenas os que cederam cidades
-                            leves_para_media = [leve for leve in leves_selecionados if leve in df_abrangencia[df_abrangencia['Região de preço'] == regiao]['LMC Name'].values]
-                            
-                            soma_produto_on_time = 0
-                            soma_produto_out_time = 0
-                            soma_volumes = 0
-                            
-                            for leve_origem in leves_para_media:
-                                if "Faixa pesos" in df_volume.columns:
+                            if estrategia_preco == "Gerar Tabela Equivalente (Focada em manter Impacto Neutro)":
+                                soma_produto_on_time = 0
+                                soma_produto_out_time = 0
+                                soma_volumes = 0
+                                
+                                # 1. Peso das cidades movidas (Origem)
+                                cidades_regiao = df_nova_abrangencia[df_nova_abrangencia['Região de preço'] == regiao]
+                                for _, row in cidades_regiao.iterrows():
+                                    leve_origem = row['LMC Name (Origem)']
+                                    cidade_movida = row['Cidade']
+                                    
+                                    # Volume específico DA CIDADE na faixa 1
                                     vol_data = df_volume[(df_volume['Leve'] == leve_origem) & 
-                                                         (df_volume['Region label'] == regiao) & 
+                                                         (df_volume['Cidade'].astype(str).str.lower() == str(cidade_movida).lower()) & 
                                                          (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
-                                else:
-                                    vol_data = df_volume[(df_volume['Leve'] == leve_origem) & (df_volume['Region label'] == regiao)]
+                                    volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
                                     
-                                volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
-                                
-                                frete_data = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao)]
-                                faixa1 = frete_data[frete_data['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
-                                
-                                if not faixa1.empty:
-                                    preco_on = faixa1['on time amount'].values[0]
-                                    preco_out = faixa1['out of time amount'].values[0]
-                                else:
-                                    preco_on, preco_out = 0, 0
+                                    # Preço do Leve de origem
+                                    frete_data = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao)]
+                                    faixa1 = frete_data[frete_data['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
                                     
-                                peso_calc = volume if volume > 0 else 1
+                                    preco_on = faixa1['on time amount'].values[0] if not faixa1.empty else 0
+                                    preco_out = faixa1['out of time amount'].values[0] if not faixa1.empty else 0
+                                        
+                                    peso_calc = volume if volume > 0 else 1
+                                    soma_produto_on_time += (preco_on * peso_calc)
+                                    soma_produto_out_time += (preco_out * peso_calc)
+                                    soma_volumes += peso_calc
                                 
-                                soma_produto_on_time += (preco_on * peso_calc)
-                                soma_produto_out_time += (preco_out * peso_calc)
-                                soma_volumes += peso_calc
+                                # 2. Peso das cidades existentes no Destino (se for Leve existente)
+                                if tipo_destino == "Um Leve Existente (já selecionado)":
+                                    vol_dest_data = df_volume[(df_volume['Leve'] == nome_destino_final) & 
+                                                              (df_volume['Region label'] == regiao) & 
+                                                              (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
+                                    volume_dest = vol_dest_data['# Total Packages'].sum() if not vol_dest_data.empty else 0
+                                    
+                                    if volume_dest > 0:
+                                        frete_dest = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao)]
+                                        faixa1_dest = frete_dest[frete_dest['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
+                                        
+                                        preco_dest_on = faixa1_dest['on time amount'].values[0] if not faixa1_dest.empty else 0
+                                        preco_dest_out = faixa1_dest['out of time amount'].values[0] if not faixa1_dest.empty else 0
+                                        
+                                        soma_produto_on_time += (preco_dest_on * volume_dest)
+                                        soma_produto_out_time += (preco_dest_out * volume_dest)
+                                        soma_volumes += volume_dest
+
+                                nova_faixa1_on = soma_produto_on_time / soma_volumes if soma_volumes > 0 else 0
+                                nova_faixa1_out = soma_produto_out_time / soma_volumes if soma_volumes > 0 else 0
                                 
-                            nova_faixa1_on = soma_produto_on_time / soma_volumes if soma_volumes > 0 else 0
-                            nova_faixa1_out = soma_produto_out_time / soma_volumes if soma_volumes > 0 else 0
+                            else:
+                                # Usar tabela existente
+                                frete_base = df_frete_clean[(df_frete_clean['LMC name'] == tabela_base_selecionada) & (df_frete_clean['label'] == regiao)]
+                                faixa1_base = frete_base[frete_base['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
+                                nova_faixa1_on = faixa1_base['on time amount'].values[0] if not faixa1_base.empty else 0
+                                nova_faixa1_out = faixa1_base['out of time amount'].values[0] if not faixa1_base.empty else 0
                             
+                            # Reconstrói a tabela
                             base_on = nova_faixa1_on / 0.83
                             base_out = nova_faixa1_out / 0.83
                             
@@ -343,6 +382,52 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             lista_novas_tabelas.append(df_regiao_tabela)
                         
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
+                        
+                        # --- CÁLCULO DE IMPACTO FINANCEIRO (OBJETIVO 5) ---
+                        custo_anterior_total = 0
+                        custo_novo_total = 0
+                        
+                        # Iteramos todas as cidades movidas
+                        for _, row in df_nova_abrangencia.iterrows():
+                            leve_orig = row['LMC Name (Origem)']
+                            cid_movida = row['Cidade']
+                            reg = row['Região de preço']
+                            
+                            # Pegamos TODOS os pacotes dessa cidade (todas as faixas)
+                            vols_cidade = df_volume[(df_volume['Leve'] == leve_orig) & (df_volume['Cidade'].astype(str).str.lower() == str(cid_movida).lower())]
+                            
+                            for _, v_row in vols_cidade.iterrows():
+                                faixa_peso = v_row['Faixa pesos']
+                                qtd_pacotes = v_row['# Total Packages']
+                                
+                                # Busca preço antigo (origem)
+                                tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_orig) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso (g/m³)'] == faixa_peso)]
+                                preco_antigo = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
+                                
+                                # Busca preço novo (proposta)
+                                tb_nova = df_tabela_final[(df_tabela_final['Região de Preço'] == reg) & (df_tabela_final['Faixa de peso (g/m³)'] == faixa_peso)]
+                                preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
+                                
+                                custo_anterior_total += (qtd_pacotes * preco_antigo)
+                                custo_novo_total += (qtd_pacotes * preco_novo)
+                                
+                        impacto_financeiro = custo_novo_total - custo_anterior_total
+                        
+                        st.subheader("📊 Impacto Financeiro (30 dias)")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Custo Anterior (Cidades Movidas)", formatar_moeda(custo_anterior_total))
+                        col2.metric("Novo Custo Projetado", formatar_moeda(custo_novo_total))
+                        
+                        # Formata o impacto para ficar bonito (verde/vermelho)
+                        if impacto_financeiro > 0:
+                            col3.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"+{formatar_moeda(impacto_financeiro)} (Aumento de custo)", delta_color="inverse")
+                        elif impacto_financeiro < 0:
+                            col3.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"{formatar_moeda(impacto_financeiro)} (Economia)", delta_color="normal")
+                        else:
+                            col3.metric("Impacto Financeiro", "R$ 0,00", "Neutro")
+
+                        st.markdown("<br>", unsafe_allow_html=True)
                         
                         # --- EXIBIÇÃO NO APLICATIVO ---
                         st.subheader("Nova Abrangência e Prazos")
