@@ -111,7 +111,7 @@ def formatar_moeda(valor):
         return valor
 
 def extrair_estado(nome_leve):
-    match = re.search(r'-\s*([A-Z]{2})\b', nome_leve)
+    match = re.search(r'-\s*([A-Z]{2})', nome_leve)
     if match:
         return match.group(1)
     return None
@@ -207,7 +207,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
     
             with st.expander("4. Dados Atuais dos Leves Selecionados", expanded=False):
                 df_abrangencia.rename(columns={'Região de preço 2023': 'Região de preço'}, inplace=True)
-        
+                
                 tab1, tab2 = st.tabs(["Tabela Frete Peso Atual", "Abrangência e Prazos"])
                 
                 with tab1:
@@ -233,6 +233,46 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_abrangencia_leve['SLO Local (Arquivo)'] = df_abrangencia_leve['Prazo adicional']
                         col_ab = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
                         st.dataframe(df_abrangencia_leve[[c for c in col_ab if c in df_abrangencia_leve.columns]], use_container_width=True, hide_index=True)
+                        
+                # Adicionado botão para baixar propostas atuais
+                st.divider()
+                st.markdown("### 📥 Download das Propostas Atuais")
+                st.markdown("Baixe um Excel com a abrangência e tabela frete peso atual de cada um dos Leves selecionados.")
+                
+                cols_download = st.columns(len(leves_selecionados))
+                for idx, leve in enumerate(leves_selecionados):
+                    with cols_download[idx]:
+                        # Prepara dados para download
+                        df_abr_dl = df_abrangencia[df_abrangencia['LMC Name'] == leve].copy()
+                        df_abr_dl['Routing Code'] = mapa_routing.get(leve, "-")
+                        df_abr_dl['SLO Local'] = df_abr_dl['Prazo adicional']
+                        colunas_abr_dl = ['Cidade', 'State', 'Região de preço', 'SLO Local']
+                        if not df_abr_dl.empty:
+                            df_abr_dl = df_abr_dl[colunas_abr_dl]
+                        
+                        df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
+                        df_frete_dl.rename(columns={
+                            'label': 'Região de Preço',
+                            'on time amount': 'Valor dentro do prazo',
+                            'out of time amount': 'Valor fora do prazo'
+                        }, inplace=True)
+                        colunas_frete_dl = ['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']
+                        if not df_frete_dl.empty:
+                            df_frete_dl = df_frete_dl[colunas_frete_dl]
+                            
+                        output_atual = io.BytesIO()
+                        with pd.ExcelWriter(output_atual, engine='openpyxl') as writer:
+                            df_abr_dl.to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
+                            df_frete_dl.to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
+                        
+                        st.download_button(
+                            label=f"Baixar Proposta Atual: {mapa_routing.get(leve, '')}",
+                            data=output_atual.getvalue(),
+                            file_name=f"Proposta_Atual_{leve.replace(' ', '_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_atual_{idx}"
+                        )
+
     
             with st.expander("5. Definição do Leve/Lead de Destino", expanded=True):
                 tipo_destino = st.radio("O destino da movimentação será para:", ["Um Leve Existente (já selecionado)", "Um Novo Lead"])
@@ -269,7 +309,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                     opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
 
-                    # --- CONTROLES DE MOVIMENTAÇÃO EM MASSA MELHORADOS ---
                     st.markdown("⚡ **Ações em Massa (Mover vários municípios de uma vez)**")
                     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns([2.5, 2.5, 2.5, 1.5, 1.5])
                     
@@ -841,7 +880,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         col_dw1, col_down2 = st.columns(2)
                         with col_dw1:
                             st.markdown("### 📥 Download da Proposta Final")
-                            st.markdown("A proposta consolidada pronta para assinatura.")
+                            st.markdown("Proposta a ser apresentada ao Leve / Lead")
                             output = io.BytesIO()
                             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                                 df_escopo_final[colunas_finais_abrangencia].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
@@ -858,7 +897,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         with col_down2:
                             if not df_auditoria_excel.empty:
                                 st.markdown("### 📊 Download do Detalhamento")
-                                st.markdown("Planilha detalhada pacote a pacote para análise da gerência.")
+                                st.markdown("Planilha detalhando com os cálculos e impactos")
                                 
                                 df_resumo = pd.DataFrame({
                                     'Custo Antigo Total': [custo_loggi_antigo],
