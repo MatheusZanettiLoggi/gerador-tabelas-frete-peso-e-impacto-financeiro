@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+import os
+import io
 
 st.set_page_config(page_title="Gerador de Propostas - Leves", layout="wide")
 
@@ -29,17 +31,18 @@ with st.sidebar.expander("1. Upload de Bases de Dados", expanded=True):
     st.markdown("[Link Looker: 26302](https://loggi.looker.com/looks/26302)")
     file_volume = st.file_uploader("Upload Volume", type=["xlsx", "csv"], label_visibility="collapsed")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("**Variação de Preços (Price variation)**")
-    file_price_var = st.file_uploader("Upload Price Variation", type=["xlsx", "csv"], label_visibility="collapsed")
-
-
 # --- FUNÇÕES DE TRATAMENTO DE DADOS ---
 @st.cache_data
 def load_data(file):
     if file.name.endswith('.csv'):
         return pd.read_csv(file)
     return pd.read_excel(file)
+
+@st.cache_data
+def load_local_excel(filename):
+    if not os.path.exists(filename):
+        return None
+    return pd.read_excel(filename)
 
 @st.cache_data
 def processar_frete(df_frete):
@@ -79,239 +82,260 @@ def extrair_estado(nome_leve):
     return None
 
 # --- FLUXO PRINCIPAL ---
-if file_frete and file_abrangencia and file_slos and file_volume and file_price_var:
-    
-    with st.spinner("Carregando e processando bases..."):
-        df_frete = load_data(file_frete)
-        df_abrangencia = load_data(file_abrangencia)
-        df_slos = load_data(file_slos)
-        df_volume = load_data(file_volume)
-        df_price_var = load_data(file_price_var)
-        
-        df_frete_clean = processar_frete(df_frete)
-        df_slos_clean = processar_slos(df_slos)
-        df_nomes_leves = processar_nomes_leves(df_volume)
-        df_price_var_clean = processar_price_var(df_price_var)
-        
-    st.sidebar.success("Todas as bases carregadas!")
+df_price_var_raw = load_local_excel("Price variation.xlsx")
 
-    with st.expander("2. Seleção de Leves", expanded=True):
-        leves_disponiveis = df_frete_clean['LMC name'].dropna().unique().tolist()
-        
-        mapa_nomes = {}
-        mapa_routing = {} 
-        
-        for lmc in leves_disponiveis:
-            match = df_nomes_leves[df_nomes_leves['Leve'] == lmc]
-            if not match.empty:
-                nome_formatado = match['nome_completo'].values[0]
-                routing_code = match['Routing Code'].values[0]
-                mapa_nomes[nome_formatado] = lmc
-                mapa_routing[lmc] = routing_code
-            else:
-                mapa_nomes[lmc] = lmc
-                mapa_routing[lmc] = "-"
-                
-        lista_nomes_exibicao = list(mapa_nomes.keys())
-        leves_selecionados_formatados = st.multiselect("Selecione os Leves envolvidos na negociação:", lista_nomes_exibicao)
-        leves_selecionados = [mapa_nomes[nome] for nome in leves_selecionados_formatados]
-
-    if leves_selecionados:
-        
-        with st.expander("3. Definição das Cidades Base", expanded=True):
-            cidades_base_dict = {}
-            cols = st.columns(len(leves_selecionados))
+if file_frete and file_abrangencia and file_slos and file_volume:
+    if df_price_var_raw is None:
+        st.error("Erro: O arquivo 'Price variation.xlsx' não foi encontrado. Por favor, certifique-se de que ele foi subido para o repositório do GitHub.")
+    else:
+        with st.spinner("Carregando e processando bases..."):
+            df_frete = load_data(file_frete)
+            df_abrangencia = load_data(file_abrangencia)
+            df_slos = load_data(file_slos)
+            df_volume = load_data(file_volume)
             
-            for idx, leve in enumerate(leves_selecionados):
-                nome_exibicao = leves_selecionados_formatados[idx]
-                estado_do_leve = extrair_estado(leve)
-                
-                if estado_do_leve:
-                    df_cidades_estado = df_slos_clean[df_slos_clean['State'] == estado_do_leve]
+            df_frete_clean = processar_frete(df_frete)
+            df_slos_clean = processar_slos(df_slos)
+            df_nomes_leves = processar_nomes_leves(df_volume)
+            df_price_var_clean = processar_price_var(df_price_var_raw)
+            
+        st.sidebar.success("Todas as bases carregadas!")
+    
+        with st.expander("2. Seleção de Leves", expanded=True):
+            leves_disponiveis = df_frete_clean['LMC name'].dropna().unique().tolist()
+            
+            mapa_nomes = {}
+            mapa_routing = {} 
+            
+            for lmc in leves_disponiveis:
+                match = df_nomes_leves[df_nomes_leves['Leve'] == lmc]
+                if not match.empty:
+                    nome_formatado = match['nome_completo'].values[0]
+                    routing_code = match['Routing Code'].values[0]
+                    mapa_nomes[nome_formatado] = lmc
+                    mapa_routing[lmc] = routing_code
                 else:
-                    df_cidades_estado = df_slos_clean 
+                    mapa_nomes[lmc] = lmc
+                    mapa_routing[lmc] = "-"
                     
-                opcoes_cidades = {}
-                for _, row in df_cidades_estado.iterrows():
-                    cid = str(row['Cidade'])
-                    est = str(row['State'])
-                    txt_display = f"{cid} - {est}"
-                    opcoes_cidades[txt_display] = cid
+            lista_nomes_exibicao = list(mapa_nomes.keys())
+            leves_selecionados_formatados = st.multiselect("Selecione os Leves envolvidos na negociação:", lista_nomes_exibicao)
+            leves_selecionados = [mapa_nomes[nome] for nome in leves_selecionados_formatados]
+    
+        if leves_selecionados:
+            
+            with st.expander("3. Definição das Cidades Base", expanded=True):
+                cidades_base_dict = {}
+                cols = st.columns(len(leves_selecionados))
+                
+                for idx, leve in enumerate(leves_selecionados):
+                    nome_exibicao = leves_selecionados_formatados[idx]
+                    estado_do_leve = extrair_estado(leve)
                     
-                lista_opcoes_display = sorted(list(opcoes_cidades.keys()))
-    
-                with cols[idx]:
-                    cidade_escolhida_display = st.selectbox(
-                        f"Cidade Base para:\n{nome_exibicao}", 
-                        lista_opcoes_display, 
-                        key=f"cidade_{leve}"
-                    )
-                    cidades_base_dict[leve] = opcoes_cidades[cidade_escolhida_display]
-
-        with st.expander("4. Dados Atuais dos Leves Selecionados", expanded=False):
-            df_abrangencia.rename(columns={'Região de preço 2023': 'Região de preço'}, inplace=True)
-    
-            tab1, tab2 = st.tabs(["Tabela Frete Peso Atual", "Abrangência e Prazos"])
-            
-            with tab1:
-                for idx, leve in enumerate(leves_selecionados):
-                    st.subheader(f"Tabela Frete Peso: {leves_selecionados_formatados[idx]}")
-                    df_frete_leve = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
-                    df_frete_leve['Routing Code'] = mapa_routing.get(leve, "-")
-                    df_frete_leve.rename(columns={
-                        'label': 'Região de preço',
-                        'on time amount': 'Valor do pacote dentro do prazo',
-                        'out of time amount': 'Valor do pacote fora do prazo'
-                    }, inplace=True)
-                    df_frete_leve['Valor do pacote dentro do prazo'] = df_frete_leve['Valor do pacote dentro do prazo'].apply(formatar_moeda)
-                    df_frete_leve['Valor do pacote fora do prazo'] = df_frete_leve['Valor do pacote fora do prazo'].apply(formatar_moeda)
-                    col_exib = ['LMC name', 'Routing Code', 'Região de preço', 'Faixa de peso (g/m³)', 'Valor do pacote dentro do prazo', 'Valor do pacote fora do prazo', 'table name']
-                    st.dataframe(df_frete_leve[[c for c in col_exib if c in df_frete_leve.columns]], use_container_width=True, hide_index=True)
-                
-            with tab2:
-                for idx, leve in enumerate(leves_selecionados):
-                    st.subheader(f"Abrangência e Prazos: {leves_selecionados_formatados[idx]}")
-                    df_abrangencia_leve = df_abrangencia[df_abrangencia['LMC Name'] == leve].copy()
-                    df_abrangencia_leve['Routing Code'] = mapa_routing.get(leve, "-")
-                    df_abrangencia_leve['SLO Local (Arquivo)'] = df_abrangencia_leve['Prazo adicional']
-                    col_ab = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
-                    st.dataframe(df_abrangencia_leve[[c for c in col_ab if c in df_abrangencia_leve.columns]], use_container_width=True, hide_index=True)
-
-        # --- FASE 3: DEFINIÇÃO DE DESTINO E MOVIMENTAÇÃO ---
-        with st.expander("5. Definição do Leve/Lead de Destino", expanded=True):
-            tipo_destino = st.radio("O destino da movimentação será para:", ["Um Leve Existente (já selecionado)", "Um Novo Lead"])
-            
-            nome_destino_final = ""
-            cidade_base_destino = ""
-            
-            if tipo_destino == "Um Leve Existente (já selecionado)":
-                nome_destino_display = st.selectbox("Selecione o Leve de Destino:", leves_selecionados_formatados)
-                nome_destino_final = mapa_nomes.get(nome_destino_display)
-                cidade_base_destino = cidades_base_dict.get(nome_destino_final)
-                st.info(f"**Cidade Base do Destino:** {cidade_base_destino}")
-                
-            else:
-                col_n1, col_n2, col_n3 = st.columns(3)
-                with col_n1:
-                    nome_destino_final = st.text_input("Nome do Novo Lead:", placeholder="Ex: Lead - SP Sorocaba...")
-                with col_n2:
-                    estados_disponiveis = sorted(df_slos_clean['State'].dropna().unique().tolist())
-                    estado_lead = st.selectbox("Estado do Novo Lead:", estados_disponiveis)
-                with col_n3:
-                    cidades_estado_lead = df_slos_clean[df_slos_clean['State'] == estado_lead]['Cidade'].tolist()
-                    cidade_base_destino = st.selectbox("Cidade Base do Novo Lead:", sorted(cidades_estado_lead))
-
-        if nome_destino_final and cidade_base_destino:
-            with st.expander("6. Manipulação de Abrangência (Tabela Interativa)", expanded=True):
-                st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir. Você pode arrastar/copiar o valor para várias células.")
-                
-                # Prepara o DataFrame com os municípios dos leves selecionados
-                df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
-                df_movimentacao = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].copy()
-                
-                # Por padrão, todos ficam no Leve atual
-                df_movimentacao['Destino'] = "Manter no Leve Atual"
-                
-                opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
-                
-                df_editado = st.data_editor(
-                    df_movimentacao,
-                    column_config={
-                        "Destino": st.column_config.SelectboxColumn(
-                            "Destino (Clique para alterar)",
-                            help="Selecione o destino deste município",
-                            options=opcoes_destino,
-                            required=True,
+                    if estado_do_leve:
+                        df_cidades_estado = df_slos_clean[df_slos_clean['State'] == estado_do_leve]
+                    else:
+                        df_cidades_estado = df_slos_clean 
+                        
+                    opcoes_cidades = {}
+                    for _, row in df_cidades_estado.iterrows():
+                        cid = str(row['Cidade'])
+                        est = str(row['State'])
+                        txt_display = f"{cid} - {est}"
+                        opcoes_cidades[txt_display] = cid
+                        
+                    lista_opcoes_display = sorted(list(opcoes_cidades.keys()))
+        
+                    with cols[idx]:
+                        cidade_escolhida_display = st.selectbox(
+                            f"Cidade Base para:\n{nome_exibicao}", 
+                            lista_opcoes_display, 
+                            key=f"cidade_{leve}"
                         )
-                    },
-                    disabled=["LMC Name", "Região de preço", "Cidade", "State"],
-                    hide_index=True,
-                    use_container_width=True,
-                    height=400
-                )
-
-            with st.expander("7. Resultados da Movimentação (Proposta)", expanded=True):
-                # Filtra apenas os municípios que foram movidos para o destino
-                df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
+                        cidades_base_dict[leve] = opcoes_cidades[cidade_escolhida_display]
+    
+            with st.expander("4. Dados Atuais dos Leves Selecionados", expanded=False):
+                df_abrangencia.rename(columns={'Região de preço 2023': 'Região de preço'}, inplace=True)
+        
+                tab1, tab2 = st.tabs(["Tabela Frete Peso Atual", "Abrangência e Prazos"])
                 
-                if df_movidos.empty:
-                    st.warning("Nenhum município foi movimentado para o destino ainda.")
+                with tab1:
+                    for idx, leve in enumerate(leves_selecionados):
+                        st.subheader(f"Tabela Frete Peso: {leves_selecionados_formatados[idx]}")
+                        df_frete_leve = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
+                        df_frete_leve['Routing Code'] = mapa_routing.get(leve, "-")
+                        df_frete_leve.rename(columns={
+                            'label': 'Região de preço',
+                            'on time amount': 'Valor do pacote dentro do prazo',
+                            'out of time amount': 'Valor do pacote fora do prazo'
+                        }, inplace=True)
+                        df_frete_leve['Valor do pacote dentro do prazo'] = df_frete_leve['Valor do pacote dentro do prazo'].apply(formatar_moeda)
+                        df_frete_leve['Valor do pacote fora do prazo'] = df_frete_leve['Valor do pacote fora do prazo'].apply(formatar_moeda)
+                        col_exib = ['LMC name', 'Routing Code', 'Região de preço', 'Faixa de peso (g/m³)', 'Valor do pacote dentro do prazo', 'Valor do pacote fora do prazo', 'table name']
+                        st.dataframe(df_frete_leve[[c for c in col_exib if c in df_frete_leve.columns]], use_container_width=True, hide_index=True)
+                    
+                with tab2:
+                    for idx, leve in enumerate(leves_selecionados):
+                        st.subheader(f"Abrangência e Prazos: {leves_selecionados_formatados[idx]}")
+                        df_abrangencia_leve = df_abrangencia[df_abrangencia['LMC Name'] == leve].copy()
+                        df_abrangencia_leve['Routing Code'] = mapa_routing.get(leve, "-")
+                        df_abrangencia_leve['SLO Local (Arquivo)'] = df_abrangencia_leve['Prazo adicional']
+                        col_ab = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
+                        st.dataframe(df_abrangencia_leve[[c for c in col_ab if c in df_abrangencia_leve.columns]], use_container_width=True, hide_index=True)
+    
+            # --- FASE 3: DEFINIÇÃO DE DESTINO E MOVIMENTAÇÃO ---
+            with st.expander("5. Definição do Leve/Lead de Destino", expanded=True):
+                tipo_destino = st.radio("O destino da movimentação será para:", ["Um Leve Existente (já selecionado)", "Um Novo Lead"])
+                
+                nome_destino_final = ""
+                cidade_base_destino = ""
+                
+                if tipo_destino == "Um Leve Existente (já selecionado)":
+                    nome_destino_display = st.selectbox("Selecione o Leve de Destino:", leves_selecionados_formatados)
+                    nome_destino_final = mapa_nomes.get(nome_destino_display)
+                    cidade_base_destino = cidades_base_dict.get(nome_destino_final)
+                    st.info(f"**Cidade Base do Destino:** {cidade_base_destino}")
+                    
                 else:
-                    st.success(f"{len(df_movidos)} município(s) movimentado(s) para **{nome_destino_final}**!")
+                    col_n1, col_n2, col_n3 = st.columns(3)
+                    with col_n1:
+                        nome_destino_final = st.text_input("Nome do Novo Lead:", placeholder="Ex: Lead - SP Sorocaba...")
+                    with col_n2:
+                        estados_disponiveis = sorted(df_slos_clean['State'].dropna().unique().tolist())
+                        estado_lead = st.selectbox("Estado do Novo Lead:", estados_disponiveis)
+                    with col_n3:
+                        cidades_estado_lead = df_slos_clean[df_slos_clean['State'] == estado_lead]['Cidade'].tolist()
+                        cidade_base_destino = st.selectbox("Cidade Base do Novo Lead:", sorted(cidades_estado_lead))
+    
+            if nome_destino_final and cidade_base_destino:
+                with st.expander("6. Manipulação de Abrangência (Tabela Interativa)", expanded=True):
+                    st.markdown("Selecione na coluna **'Destino'** para onde cada município deve ir. Você pode arrastar/copiar o valor para várias células.")
                     
-                    # --- CÁLCULO DA NOVA ABRANGÊNCIA E SLO LOCAL ---
-                    slo_base_dest = df_slos_clean[df_slos_clean['Cidade'] == cidade_base_destino]['SLO'].values
-                    slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
+                    df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
+                    df_movimentacao = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].copy()
+                    df_movimentacao['Destino'] = "Manter no Leve Atual"
                     
-                    df_nova_abrangencia = df_movidos[['Região de preço', 'Cidade', 'State', 'LMC Name']].copy()
-                    df_nova_abrangencia = df_nova_abrangencia.merge(df_slos_clean[['Cidade', 'SLO']], on='Cidade', how='left')
-                    df_nova_abrangencia['Novo SLO Local'] = df_nova_abrangencia['SLO'] - slo_base_dest_val
-                    df_nova_abrangencia['Novo SLO Local'] = df_nova_abrangencia['Novo SLO Local'].apply(lambda x: x if x > 0 else 0)
+                    opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
                     
-                    # --- CÁLCULO DA NOVA TABELA FRETE PESO ---
-                    # 1. Identifica as regiões de preço que foram movimentadas
-                    regioes_movimentadas = df_nova_abrangencia['Região de preço'].unique()
+                    df_editado = st.data_editor(
+                        df_movimentacao,
+                        column_config={
+                            "Destino": st.column_config.SelectboxColumn(
+                                "Destino (Clique para alterar)",
+                                help="Selecione o destino deste município",
+                                options=opcoes_destino,
+                                required=True,
+                            )
+                        },
+                        disabled=["LMC Name", "Região de preço", "Cidade", "State"],
+                        hide_index=True,
+                        use_container_width=True,
+                        height=400
+                    )
+    
+                with st.expander("7. Resultados da Movimentação (Proposta)", expanded=True):
+                    df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
                     
-                    lista_novas_tabelas = []
-                    
-                    for regiao in regioes_movimentadas:
-                        # Pega os Leves originais que cederam cidades dessa região
-                        leves_origem = df_nova_abrangencia[df_nova_abrangencia['Região de preço'] == regiao]['LMC Name'].unique()
+                    if df_movidos.empty:
+                        st.warning("Nenhum município foi movimentado para o destino ainda.")
+                    else:
+                        st.success(f"{len(df_movidos)} município(s) movimentado(s) para **{nome_destino_final}**!")
                         
-                        soma_produto_on_time = 0
-                        soma_produto_out_time = 0
-                        soma_volumes = 0
+                        # --- CÁLCULO DA NOVA ABRANGÊNCIA E SLO LOCAL ---
+                        slo_base_dest = df_slos_clean[df_slos_clean['Cidade'] == cidade_base_destino]['SLO'].values
+                        slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
                         
-                        for leve_origem in leves_origem:
-                            # Pega volume
-                            vol_data = df_volume[(df_volume['Leve'] == leve_origem) & (df_volume['Region label'] == regiao)]
-                            volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
+                        df_nova_abrangencia = df_movidos[['Região de preço', 'Cidade', 'State', 'LMC Name']].copy()
+                        df_nova_abrangencia = df_nova_abrangencia.merge(df_slos_clean[['Cidade', 'SLO']], on='Cidade', how='left')
+                        df_nova_abrangencia['Novo SLO Local'] = df_nova_abrangencia['SLO'] - slo_base_dest_val
+                        df_nova_abrangencia['Novo SLO Local'] = df_nova_abrangencia['Novo SLO Local'].apply(lambda x: x if x > 0 else 0)
+                        
+                        # Padronizando o nome da coluna para visualização e exportação
+                        df_nova_abrangencia.rename(columns={'LMC Name': 'LMC Name (Origem)'}, inplace=True)
+                        colunas_finais_abrangencia = ['Região de preço', 'Cidade', 'State', 'Novo SLO Local', 'LMC Name (Origem)']
+                        
+                        # --- CÁLCULO DA NOVA TABELA FRETE PESO ---
+                        regioes_movimentadas = df_nova_abrangencia['Região de preço'].unique()
+                        lista_novas_tabelas = []
+                        
+                        for regiao in regioes_movimentadas:
+                            leves_origem = df_nova_abrangencia[df_nova_abrangencia['Região de preço'] == regiao]['LMC Name (Origem)'].unique()
                             
-                            # Pega preço da Faixa 1 do Leve origem
-                            frete_data = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao)]
-                            faixa1 = frete_data[frete_data['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
+                            soma_produto_on_time = 0
+                            soma_produto_out_time = 0
+                            soma_volumes = 0
                             
-                            if not faixa1.empty:
-                                preco_on = faixa1['on time amount'].values[0]
-                                preco_out = faixa1['out of time amount'].values[0]
-                            else:
-                                preco_on, preco_out = 0, 0
+                            for leve_origem in leves_origem:
+                                # Filtra o volume especificamente para a primeira faixa de peso (01 0 to 300) usando a nova coluna 'Faixa pesos'
+                                if "Faixa pesos" in df_volume.columns:
+                                    vol_data = df_volume[(df_volume['Leve'] == leve_origem) & 
+                                                         (df_volume['Region label'] == regiao) & 
+                                                         (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
+                                else:
+                                    # Fallback caso a coluna mude novamente
+                                    vol_data = df_volume[(df_volume['Leve'] == leve_origem) & (df_volume['Region label'] == regiao)]
+                                    
+                                volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
                                 
-                            # Se não houver volume na base, assume peso 1 para fazer média simples
-                            peso_calc = volume if volume > 0 else 1
+                                frete_data = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao)]
+                                faixa1 = frete_data[frete_data['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
+                                
+                                if not faixa1.empty:
+                                    preco_on = faixa1['on time amount'].values[0]
+                                    preco_out = faixa1['out of time amount'].values[0]
+                                else:
+                                    preco_on, preco_out = 0, 0
+                                    
+                                peso_calc = volume if volume > 0 else 1
+                                
+                                soma_produto_on_time += (preco_on * peso_calc)
+                                soma_produto_out_time += (preco_out * peso_calc)
+                                soma_volumes += peso_calc
+                                
+                            nova_faixa1_on = soma_produto_on_time / soma_volumes if soma_volumes > 0 else 0
+                            nova_faixa1_out = soma_produto_out_time / soma_volumes if soma_volumes > 0 else 0
                             
-                            soma_produto_on_time += (preco_on * peso_calc)
-                            soma_produto_out_time += (preco_out * peso_calc)
-                            soma_volumes += peso_calc
+                            base_on = nova_faixa1_on / 0.83
+                            base_out = nova_faixa1_out / 0.83
                             
-                        # Média ponderada da Faixa 1
-                        nova_faixa1_on = soma_produto_on_time / soma_volumes if soma_volumes > 0 else 0
-                        nova_faixa1_out = soma_produto_out_time / soma_volumes if soma_volumes > 0 else 0
+                            df_regiao_tabela = df_price_var_clean.copy()
+                            df_regiao_tabela['Região de Preço'] = regiao
+                            df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
+                            df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_out
+                            
+                            lista_novas_tabelas.append(df_regiao_tabela)
                         
-                        # Acha o Preço Base (índice 1.00) dividindo por 0.83
-                        base_on = nova_faixa1_on / 0.83
-                        base_out = nova_faixa1_out / 0.83
+                        df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
                         
-                        # Reconstrói a tabela usando o Price Variation
-                        df_regiao_tabela = df_price_var_clean.copy()
-                        df_regiao_tabela['Região de Preço'] = regiao
-                        df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
-                        df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_out
+                        # --- EXIBIÇÃO NO APLICATIVO ---
+                        st.subheader("Nova Abrangência e Prazos")
+                        st.dataframe(df_nova_abrangencia[colunas_finais_abrangencia], hide_index=True, use_container_width=True)
                         
-                        lista_novas_tabelas.append(df_regiao_tabela)
-                    
-                    df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
-                    
-                    # Organizando visualização
-                    st.subheader("Nova Abrangência e Prazos")
-                    st.dataframe(df_nova_abrangencia[['Região de preço', 'Cidade', 'State', 'Novo SLO Local', 'LMC Name (Origem)' if 'LMC Name' not in df_nova_abrangencia.columns else 'LMC Name']], hide_index=True, use_container_width=True)
-                    
-                    st.subheader("Nova Tabela Frete Peso Projetada")
-                    df_exibicao_tabela = df_tabela_final[['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']].copy()
-                    df_exibicao_tabela['Valor dentro do prazo'] = df_exibicao_tabela['Valor dentro do prazo'].apply(formatar_moeda)
-                    df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
-                    
-                    st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
+                        st.subheader("Nova Tabela Frete Peso Projetada")
+                        df_exibicao_tabela = df_tabela_final[['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']].copy()
+                        df_exibicao_tabela['Valor dentro do prazo'] = df_exibicao_tabela['Valor dentro do prazo'].apply(formatar_moeda)
+                        df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
+                        st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
+
+                        # --- BOTÃO DE DOWNLOAD EXCEL (OBJETIVO 4) ---
+                        st.divider()
+                        st.markdown("### 📥 Download da Proposta")
+                        st.markdown("Faça o download das tabelas geradas acima em formato Excel para envio/apresentação.")
+                        
+                        # Cria o arquivo Excel em memória
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            df_nova_abrangencia[colunas_finais_abrangencia].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
+                            df_exibicao_tabela.to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
+                        
+                        # Botão de download do Streamlit
+                        st.download_button(
+                            label="Baixar Proposta em Excel",
+                            data=output.getvalue(),
+                            file_name=f"Proposta_Movimentacao_{nome_destino_final.replace(' ', '_')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            type="primary"
+                        )
 
 else:
-    st.info("Por favor, faça o upload de **todas as 5 bases** na barra lateral para prosseguir.")
+    st.info("Por favor, faça o upload de **todas as 4 bases** na barra lateral para prosseguir.")
