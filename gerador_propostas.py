@@ -5,7 +5,7 @@ import re
 import os
 import io
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 # Tenta importar a biblioteca de PDF
 try:
@@ -129,9 +129,9 @@ def create_pdf_report(nome_destino, estrategia,
                       fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
                       loggi_antigo, vol_loggi, tk_loggi_antigo,
                       loggi_novo, tk_loggi_novo, imp_loggi, perc_imp_loggi,
-                      detalhes_reg, df_abrangencia_out, df_tabela_out):
+                      detalhes_reg, df_abrangencia_out, df_tabela_out, tabelas_atuais_pdf):
     
-    # PDF em Paisagem (Landscape) para caber tabelas largas
+    # PDF em Paisagem (Landscape)
     pdf = FPDF(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -153,14 +153,15 @@ def create_pdf_report(nome_destino, estrategia,
         for _, row in df.iterrows():
             for item, w in zip(row, col_widths):
                 safe_item = unicodedata.normalize('NFKD', str(item)).encode('ascii', 'ignore').decode('ascii')
-                # Trunca se for muito grande para não quebrar a célula (margem de segurança visual)
                 max_chars = int(w * 0.5) 
                 pdf.cell(w, 6, safe_item[:max_chars], border=1, align='C')
             pdf.ln()
 
     # --- CABEÇALHO ---
     add_line("RELATORIO DO SIMULADOR DE MOVIMENTACAO DE LEVES", bold=True, size=14, align='C')
-    data_extracao = datetime.now().strftime("%d/%m/%Y as %H:%M")
+    # Fuso horário do Brasil (UTC-3)
+    fuso_brasilia = timezone(timedelta(hours=-3))
+    data_extracao = datetime.now(fuso_brasilia).strftime("%d/%m/%Y as %H:%M")
     add_line(f"Gerado em: {data_extracao}", size=9, align='C')
     pdf.ln(5)
     
@@ -195,19 +196,28 @@ def create_pdf_report(nome_destino, estrategia,
 
     pdf.add_page()
     
-    # --- TABELAS ---
-    add_line("4. ABRANGENCIA COMPLETA PROJETADA", bold=True, size=11)
+    # --- TABELAS PROJETADAS ---
+    add_line(f"4. ABRANGENCIA COMPLETA PROJETADA: {nome_destino}", bold=True, size=11)
     pdf.ln(2)
-    # A4 Landscape tem ~277mm de largura útil
-    widths_abr = [70, 20, 50, 30, 90] # Total ~260mm
+    widths_abr = [70, 20, 50, 30, 90] 
     draw_table(df_abrangencia_out, widths_abr)
     
     pdf.add_page()
     
-    add_line("5. TABELA FRETE PESO PROJETADA", bold=True, size=11)
+    add_line(f"5. TABELA FRETE PESO PROJETADA: {nome_destino}", bold=True, size=11)
     pdf.ln(2)
-    widths_frete = [50, 70, 70, 70] # Total 260mm
+    widths_frete = [50, 70, 70, 70] 
     draw_table(df_tabela_out, widths_frete)
+
+    # --- TABELAS ATUAIS (NOVA SEÇÃO 6) ---
+    if tabelas_atuais_pdf:
+        pdf.add_page()
+        add_line("6. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)", bold=True, size=11)
+        for leve_nome, df_tab in tabelas_atuais_pdf.items():
+            pdf.ln(4)
+            add_line(f"Leve Atual: {leve_nome}", bold=True, size=10)
+            pdf.ln(2)
+            draw_table(df_tab, widths_frete)
 
     pdf_out = pdf.output(dest="S")
     if isinstance(pdf_out, str):
@@ -641,7 +651,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                                 
                                                 vol_cidade += qtd
                                                 custo_cidade += qtd * preco_on
-                                                
                                             if vol_cidade > 0:
                                                 texto_explicativo.append(f" - {str(cid_ext).title()}: {int(vol_cidade)} pct | Custo Atual: {formatar_moeda(custo_cidade)}")
 
@@ -980,6 +989,22 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                         st.divider()
                         
+                        # PREPARAÇÃO DE DADOS ATUAIS PARA O PDF
+                        tabelas_atuais_pdf = {}
+                        for leve in leves_selecionados:
+                            df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
+                            df_frete_dl.rename(columns={
+                                'label': 'Regiao de Preco',
+                                'on time amount': 'Valor dentro do prazo',
+                                'out of time amount': 'Valor fora do prazo',
+                                'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'
+                            }, inplace=True)
+                            df_frete_dl['Valor dentro do prazo'] = df_frete_dl['Valor dentro do prazo'].apply(formatar_moeda)
+                            df_frete_dl['Valor fora do prazo'] = df_frete_dl['Valor fora do prazo'].apply(formatar_moeda)
+                            colunas_frete_dl = ['Regiao de Preco', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']
+                            if not df_frete_dl.empty:
+                                tabelas_atuais_pdf[leve] = df_frete_dl[colunas_frete_dl]
+                        
                         col_dw1, col_down2, col_down3 = st.columns(3)
                         with col_dw1:
                             st.markdown("### 📥 Download da Proposta Final")
@@ -1036,7 +1061,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_crescimento,
                                     custo_loggi_antigo, vol_loggi_total, tk_loggi_antigo,
                                     global_custo_novo_total, tk_loggi_novo, impacto_loggi, perc_impacto_loggi,
-                                    detalhes_regioes, df_escopo_final[colunas_finais_abrangencia], df_exibicao_tabela
+                                    detalhes_regioes, df_escopo_final[colunas_finais_abrangencia], df_exibicao_tabela,
+                                    tabelas_atuais_pdf
                                 )
                                 st.download_button(
                                     label="Baixar Relatório (PDF)",
