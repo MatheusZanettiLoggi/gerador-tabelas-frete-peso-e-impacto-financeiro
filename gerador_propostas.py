@@ -324,13 +324,43 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     regioes_finais_destino = df_escopo_final['Região de preço'].unique()
                     regioes_movimentadas = df_movidos['Região de preço'].unique()
 
+                    # --- GESTÃO DE ESTADO (SESSION STATE) PARA OS AJUSTES ---
+                    for regiao in regioes_finais_destino:
+                        if f"ajuste_{regiao}" not in st.session_state:
+                            st.session_state[f"ajuste_{regiao}"] = 0.0
+
+                    def aplicar_ajuste_global():
+                        val = st.session_state.ajuste_global_input
+                        for r in regioes_finais_destino:
+                            st.session_state[f"ajuste_{r}"] = val
+
+                    def zerar_ajuste_regiao(r):
+                        st.session_state[f"ajuste_{r}"] = 0.0
+
                     with st.expander("8. Ajustes Comerciais (Opcional)", expanded=True):
                         st.markdown("Insira um percentual de reajuste (positivo ou negativo) para as tabelas do Leve de destino. Deixe 0 para manter o valor calculado.")
+                        
+                        st.markdown("**Ajuste em Massa:**")
+                        cg1, cg2, cg3 = st.columns([1.5, 2, 4])
+                        with cg1:
+                            st.number_input("Todas as regiões (%)", step=0.5, format="%.2f", key="ajuste_global_input")
+                        with cg2:
+                            st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                            st.button("Aplicar a todas", on_click=aplicar_ajuste_global)
+                            
+                        st.divider()
+                        
+                        st.markdown("**Ajustes Individuais:**")
                         ajustes_dict = {}
                         cols_ajuste = st.columns(3)
                         for i, regiao in enumerate(sorted(regioes_finais_destino)):
                             with cols_ajuste[i % 3]:
-                                ajustes_dict[regiao] = st.number_input(f"Ajuste {regiao} (%)", value=0.0, step=0.5, format="%.2f")
+                                c_input, c_btn = st.columns([2, 1])
+                                with c_input:
+                                    ajustes_dict[regiao] = st.number_input(f"Ajuste {regiao} (%)", step=0.5, format="%.2f", key=f"ajuste_{regiao}")
+                                with c_btn:
+                                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                                    st.button("Zerar", key=f"btn_zerar_{regiao}", on_click=zerar_ajuste_regiao, args=(regiao,))
 
                     with st.expander("9. Resultados e Impacto Financeiro (Proposta)", expanded=True):
                         st.success(f"Proposta gerada para **{nome_destino_final}**!")
@@ -341,13 +371,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         texto_explicativo.append(f"Destino: {nome_destino_final}")
                         texto_explicativo.append(f"Estratégia Escolhida: {estrategia_preco}\n")
                         
-                        # Variáveis Globais de Agregação
                         global_vol_destino_original = 0
                         global_custo_destino_original = 0
-                        
                         global_vol_migrado = 0
                         global_custo_migrado_original = 0
-                        
                         global_custo_novo_total = 0
                         
                         detalhes_regioes = {}
@@ -441,7 +468,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
                                 df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_out
                                 
-                                # APLICAÇÃO DO AJUSTE COMERCIAL
                                 ajuste_perc = ajustes_dict.get(regiao, 0.0)
                                 if ajuste_perc != 0.0:
                                     fator = 1 + (ajuste_perc / 100)
@@ -456,7 +482,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     val = prow['Valor dentro do prazo']
                                     texto_explicativo.append(f"{fx}: Mult {mult:.2f} x {formatar_moeda(base_on)} = {formatar_moeda(val)}")
                                 
-                                # IMPACTO DESTA REGIÃO
                                 reg_vol_antigo_loggi = 0
                                 reg_custo_antigo_loggi = 0
                                 reg_custo_novo_loggi = 0
@@ -524,7 +549,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 reg_custo_antigo_loggi = 0
                                 reg_custo_novo_loggi = 0
                                 
-                                # APLICAÇÃO DO AJUSTE COMERCIAL MESMO EM TABELAS MANTIDAS
                                 ajuste_perc = ajustes_dict.get(regiao, 0.0)
                                 if ajuste_perc != 0.0:
                                     fator = 1 + (ajuste_perc / 100)
