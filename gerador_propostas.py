@@ -126,18 +126,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             
             df_price_var_clean = processar_price_var(df_price_var_raw)
             
-        # VALIDAÇÃO DE SEGURANÇA APRIMORADA
-        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
-            st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
-            st.markdown("Mesmo com as traduções, as colunas fundamentais não foram encontradas.")
-            st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
-            st.stop()
-            
-        if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
-            st.error("🚨 **Atenção: Base de Volume Desatualizada!**")
-            st.markdown("Parece que você fez o upload de uma **versão antiga** da base de volume (sem as colunas `Cidade` e/ou `Faixa pesos`). Lembra que incluímos essas colunas no Looker para conseguir calcular o **Impacto Financeiro** de maneira cirúrgica por município? 😉")
-            st.markdown("**Como resolver:** Clique no 'X' no arquivo de Volume atual na barra lateral e faça o upload da base mais recente.")
-            st.info(f"📋 **Colunas que o app encontrou no seu arquivo atual:** `{list(df_volume.columns)}`")
+        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns or 'Cidade' not in df_volume.columns:
+            st.error("🚨 **Colunas ausentes no arquivo de Volume!**")
             st.stop()
             
         with st.spinner("Finalizando processamento..."):
@@ -317,6 +307,9 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_nova_abrangencia.rename(columns={'LMC Name': 'LMC Name (Origem)'}, inplace=True)
                         colunas_finais_abrangencia = ['Região de preço', 'Cidade', 'State', 'Novo SLO Local', 'LMC Name (Origem)']
                         
+                        # Variaveis para o log de explicação
+                        log_explicacao = []
+                        
                         # --- CÁLCULO DA NOVA TABELA FRETE PESO ---
                         regioes_movimentadas = df_nova_abrangencia['Região de preço'].unique()
                         lista_novas_tabelas = []
@@ -327,19 +320,19 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 soma_produto_out_time = 0
                                 soma_volumes = 0
                                 
+                                log_explicacao.append(f"**Cálculo da Região {regiao}:**")
+                                
                                 # 1. Peso das cidades movidas (Origem)
                                 cidades_regiao = df_nova_abrangencia[df_nova_abrangencia['Região de preço'] == regiao]
                                 for _, row in cidades_regiao.iterrows():
                                     leve_origem = row['LMC Name (Origem)']
                                     cidade_movida = row['Cidade']
                                     
-                                    # Volume específico DA CIDADE na faixa 1
                                     vol_data = df_volume[(df_volume['Leve'] == leve_origem) & 
                                                          (df_volume['Cidade'].astype(str).str.lower() == str(cidade_movida).lower()) & 
                                                          (df_volume['Faixa pesos'].astype(str).str.contains('01 0 to 300', case=False, na=False))]
                                     volume = vol_data['# Total Packages'].sum() if not vol_data.empty else 0
                                     
-                                    # Preço do Leve de origem
                                     frete_data = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao)]
                                     faixa1 = frete_data[frete_data['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
                                     
@@ -350,8 +343,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     soma_produto_on_time += (preco_on * peso_calc)
                                     soma_produto_out_time += (preco_out * peso_calc)
                                     soma_volumes += peso_calc
+                                    
+                                    log_explicacao.append(f"- Cidade movida ({cidade_movida.title()}): {volume} pacotes na Faixa 1 * {formatar_moeda(preco_on)} (Preço antigo).")
                                 
-                                # 2. Peso das cidades existentes no Destino (se for Leve existente)
+                                # 2. Peso das cidades existentes no Destino
                                 if tipo_destino == "Um Leve Existente (já selecionado)":
                                     vol_dest_data = df_volume[(df_volume['Leve'] == nome_destino_final) & 
                                                               (df_volume['Region label'] == regiao) & 
@@ -368,18 +363,22 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         soma_produto_on_time += (preco_dest_on * volume_dest)
                                         soma_produto_out_time += (preco_dest_out * volume_dest)
                                         soma_volumes += volume_dest
+                                        
+                                        log_explicacao.append(f"- Destino ({nome_destino_final}): {volume_dest} pacotes na Faixa 1 * {formatar_moeda(preco_dest_on)} (Preço atual).")
 
                                 nova_faixa1_on = soma_produto_on_time / soma_volumes if soma_volumes > 0 else 0
                                 nova_faixa1_out = soma_produto_out_time / soma_volumes if soma_volumes > 0 else 0
                                 
+                                log_explicacao.append(f"**Preço Equivalente Faixa 1 Calculado:** {formatar_moeda(nova_faixa1_on)}.")
+                                
                             else:
-                                # Usar tabela existente
                                 frete_base = df_frete_clean[(df_frete_clean['LMC name'] == tabela_base_selecionada) & (df_frete_clean['label'] == regiao)]
                                 faixa1_base = frete_base[frete_base['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
                                 nova_faixa1_on = faixa1_base['on time amount'].values[0] if not faixa1_base.empty else 0
                                 nova_faixa1_out = faixa1_base['out of time amount'].values[0] if not faixa1_base.empty else 0
+                                
+                                log_explicacao.append(f"Utilizando tabela existente. Preço Base Faixa 1 copiado: {formatar_moeda(nova_faixa1_on)}")
                             
-                            # Reconstrói a tabela
                             base_on = nova_faixa1_on / 0.83
                             base_out = nova_faixa1_out / 0.83
                             
@@ -392,28 +391,24 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
                         
-                        # --- CÁLCULO DE IMPACTO FINANCEIRO (OBJETIVO 5) ---
+                        # --- CÁLCULO DE IMPACTO FINANCEIRO ---
                         custo_anterior_total = 0
                         custo_novo_total = 0
                         
-                        # Iteramos todas as cidades movidas
                         for _, row in df_nova_abrangencia.iterrows():
                             leve_orig = row['LMC Name (Origem)']
                             cid_movida = row['Cidade']
                             reg = row['Região de preço']
                             
-                            # Pegamos TODOS os pacotes dessa cidade (todas as faixas)
                             vols_cidade = df_volume[(df_volume['Leve'] == leve_orig) & (df_volume['Cidade'].astype(str).str.lower() == str(cid_movida).lower())]
                             
                             for _, v_row in vols_cidade.iterrows():
                                 faixa_peso = v_row['Faixa pesos']
                                 qtd_pacotes = v_row['# Total Packages']
                                 
-                                # Busca preço antigo (origem)
                                 tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_orig) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso (g/m³)'] == faixa_peso)]
                                 preco_antigo = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
                                 
-                                # Busca preço novo (proposta)
                                 tb_nova = df_tabela_final[(df_tabela_final['Região de Preço'] == reg) & (df_tabela_final['Faixa de peso (g/m³)'] == faixa_peso)]
                                 preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
                                 
@@ -434,6 +429,21 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             col3.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"{formatar_moeda(impacto_financeiro)} (Economia)", delta_color="normal")
                         else:
                             col3.metric("Impacto Financeiro", "R$ 0,00", "Neutro")
+                            
+                        with st.expander("🤔 Como esse cálculo foi feito?", expanded=False):
+                            st.markdown("\n".join(log_explicacao))
+                            if estrategia_preco == "Gerar Tabela Equivalente (Focada em manter Impacto Neutro)":
+                                st.markdown("""
+                                ---
+                                **Por que o impacto não é exatamente R$ 0,00?**
+                                O aplicativo calcula o novo preço *ancorado na Faixa 1*, fazendo uma média ponderada exata para ela. Depois, ele gera as outras 22 faixas utilizando a curva padrão matemática (0.83). Se as cidades movidas tiverem um perfil de peso distorcido (entregando proporcionalmente mais pacotes pesados do que a curva prevê, por exemplo), isso gera uma leve flutuação financeira no final. Esse é o comportamento matematicamente esperado para criação de tabelas equivalentes.
+                                """)
+                            else:
+                                st.markdown("""
+                                ---
+                                **Diferenças de Arredondamento:**
+                                O impacto financeiro usa todas as casas decimais reais da tabela matemática para garantir a máxima precisão possível. Cálculos manuais feitos no Excel usando apenas os valores visíveis (com 2 casas decimais) podem gerar diferenças de alguns centavos/reais em grandes volumes.
+                                """)
 
                         st.markdown("<br>", unsafe_allow_html=True)
                         
