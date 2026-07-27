@@ -126,8 +126,15 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             
             df_price_var_clean = processar_price_var(df_price_var_raw)
             
-        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns or 'Cidade' not in df_volume.columns:
-            st.error("🚨 **Colunas ausentes no arquivo de Volume!**")
+        if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
+            st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
+            st.markdown("Mesmo com as traduções, as colunas fundamentais não foram encontradas.")
+            st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
+            st.stop()
+            
+        if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
+            st.error("🚨 **Atenção: Base de Volume Desatualizada!**")
+            st.markdown("Parece que você fez o upload de uma **versão antiga** da base de volume (sem as colunas `Cidade` e/ou `Faixa pesos`).")
             st.stop()
             
         with st.spinner("Finalizando processamento..."):
@@ -294,7 +301,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     with st.expander("8. Resultados e Impacto Financeiro (Proposta)", expanded=True):
                         st.success(f"Proposta gerada para **{nome_destino_final}**!")
                         
-                        # PREPARAÇÃO DA ABRANGÊNCIA TOTAL DO DESTINO (Objetivo 2)
                         if tipo_destino == "Um Leve Existente (já selecionado)":
                             df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
                             df_abrangencia_existente['Observação'] = "Abrangência Atual"
@@ -318,7 +324,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         
                         colunas_finais_abrangencia = ['Cidade', 'State', 'Região de preço', 'Novo SLO Local', 'Observação']
                         
-                        # --- CÁLCULO DAS TABELAS FRETE PESO E IMPACTO ---
                         regioes_finais_destino = df_escopo_final['Região de preço'].unique()
                         regioes_movimentadas = df_movidos['Região de preço'].unique()
                         
@@ -330,16 +335,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         
                         custo_anterior_total = 0
                         custo_novo_total = 0
+                        volume_total_pacotes = 0
                         
                         for regiao in regioes_finais_destino:
                             texto_explicativo.append(f"--------------------------------------------------")
                             texto_explicativo.append(f"📍 REGIÃO: {regiao}")
                             texto_explicativo.append(f"--------------------------------------------------")
                             
-                            cidades_da_regiao = df_escopo_final[df_escopo_final['Região de preço'] == regiao]['Cidade'].unique()
-                            municipios_str = ", ".join(sorted([str(c).title() for c in cidades_da_regiao]))
-                            
-                            # CRIA A VARIÁVEL PARA NÃO QUEBRAR LÁ NA FRENTE
                             cidades_mov_regiao = df_movidos[df_movidos['Região de preço'] == regiao]
                             
                             if regiao in regioes_movimentadas:
@@ -349,8 +351,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     soma_volumes = 0
                                     
                                     texto_explicativo.append(">> PASSO 1: Somatório de Volumes (Apenas Faixa 1: 0 a 300g)\n")
-                                    
                                     texto_explicativo.append("Cidades Migradas (Origem):")
+                                    
                                     for _, row in cidades_mov_regiao.iterrows():
                                         leve_origem = row['LMC Name']
                                         cidade_movida = row['Cidade']
@@ -448,6 +450,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         
                                         custo_anterior_total += (qtd_pacotes * preco_antigo)
                                         custo_novo_total += (qtd_pacotes * preco_novo)
+                                        volume_total_pacotes += qtd_pacotes
                                         
                                 if tipo_destino == "Um Leve Existente (já selecionado)":
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
@@ -467,6 +470,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             
                                             custo_anterior_total += (qtd_pacotes * preco_antigo)
                                             custo_novo_total += (qtd_pacotes * preco_novo)
+                                            volume_total_pacotes += qtd_pacotes
                                 
                                 texto_explicativo.append("\n")
 
@@ -475,8 +479,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 df_regiao_tabela = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao)].copy()
                                 df_regiao_tabela.rename(columns={'label': 'Região de Preço', 'on time amount': 'Valor dentro do prazo', 'out of time amount': 'Valor fora do prazo'}, inplace=True)
                             
-                            df_regiao_tabela['Municípios'] = municipios_str
-                            df_regiao_tabela = df_regiao_tabela[['Região de Preço', 'Municípios', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']]
+                            df_regiao_tabela = df_regiao_tabela[['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']]
                             lista_novas_tabelas.append(df_regiao_tabela)
                         
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
@@ -485,18 +488,34 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         # --- EXIBIÇÃO DO IMPACTO FINANCEIRO ---
                         impacto_financeiro = custo_novo_total - custo_anterior_total
                         
+                        ticket_antigo = custo_anterior_total / volume_total_pacotes if volume_total_pacotes > 0 else 0
+                        ticket_novo = custo_novo_total / volume_total_pacotes if volume_total_pacotes > 0 else 0
+                        percentual_impacto = (impacto_financeiro / custo_anterior_total) * 100 if custo_anterior_total > 0 else 0
+                        
                         st.subheader("📊 Impacto Financeiro (30 dias)")
                         
                         col1, col2, col3 = st.columns(3)
-                        col1.metric("Custo Antigo (Todas as cidades afetadas)", formatar_moeda(custo_anterior_total))
-                        col2.metric("Novo Custo Projetado", formatar_moeda(custo_novo_total))
                         
-                        if impacto_financeiro > 0:
-                            col3.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"+{formatar_moeda(impacto_financeiro)} (Aumento de custo)", delta_color="inverse")
-                        elif impacto_financeiro < 0:
-                            col3.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"{formatar_moeda(impacto_financeiro)} (Economia)", delta_color="normal")
-                        else:
-                            col3.metric("Impacto Financeiro", "R$ 0,00", "Neutro")
+                        with col1:
+                            st.metric("Custo Antigo (Cidades afetadas)", formatar_moeda(custo_anterior_total))
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(volume_total_pacotes):,} pacotes</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(ticket_antigo)}</span>", unsafe_allow_html=True)
+
+                        with col2:
+                            st.metric("Novo Custo Projetado", formatar_moeda(custo_novo_total))
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(volume_total_pacotes):,} pacotes</span>", unsafe_allow_html=True)
+                            st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(ticket_novo)}</span>", unsafe_allow_html=True)
+
+                        with col3:
+                            if impacto_financeiro > 0:
+                                st.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"+{formatar_moeda(impacto_financeiro)} (Aumento de custo)", delta_color="inverse")
+                                st.markdown(f"<span style='font-size: 0.9em; color: #ff4b4b; font-weight: bold;'>▲ +{percentual_impacto:.2f}%</span>", unsafe_allow_html=True)
+                            elif impacto_financeiro < 0:
+                                st.metric("Impacto Financeiro", formatar_moeda(impacto_financeiro), f"{formatar_moeda(impacto_financeiro)} (Economia)", delta_color="normal")
+                                st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▼ {percentual_impacto:.2f}%</span>", unsafe_allow_html=True)
+                            else:
+                                st.metric("Impacto Financeiro", "R$ 0,00", "Neutro")
+                                st.markdown(f"<span style='font-size: 0.9em; color: gray;'>0.00%</span>", unsafe_allow_html=True)
                             
                         with st.expander("🤔 Detalhes do Cálculo & Proporção das Tabelas", expanded=False):
                             st.markdown("Baixe o memorial descritivo completo para ver exatamente os volumes utilizados, o cálculo da média ponderada e a aplicação da curva padrão nas 23 faixas.")
