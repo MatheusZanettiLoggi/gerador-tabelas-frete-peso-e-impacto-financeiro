@@ -111,7 +111,7 @@ def formatar_moeda(valor):
         return valor
 
 def extrair_estado(nome_leve):
-    match = re.search(r'-\s*([A-Z]{2})', nome_leve)
+    match = re.search(r'-\s*([A-Z]{2})\b', nome_leve)
     if match:
         return match.group(1)
     return None
@@ -218,11 +218,12 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_frete_leve.rename(columns={
                             'label': 'Região de preço',
                             'on time amount': 'Valor do pacote dentro do prazo',
-                            'out of time amount': 'Valor do pacote fora do prazo'
+                            'out of time amount': 'Valor do pacote fora do prazo',
+                            'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'
                         }, inplace=True)
                         df_frete_leve['Valor do pacote dentro do prazo'] = df_frete_leve['Valor do pacote dentro do prazo'].apply(formatar_moeda)
                         df_frete_leve['Valor do pacote fora do prazo'] = df_frete_leve['Valor do pacote fora do prazo'].apply(formatar_moeda)
-                        col_exib = ['LMC name', 'Routing Code', 'Região de preço', 'Faixa de peso (g/m³)', 'Valor do pacote dentro do prazo', 'Valor do pacote fora do prazo', 'table name']
+                        col_exib = ['LMC name', 'Routing Code', 'Região de preço', 'Faixa de peso cubado (g)', 'Valor do pacote dentro do prazo', 'Valor do pacote fora do prazo', 'table name']
                         st.dataframe(df_frete_leve[[c for c in col_exib if c in df_frete_leve.columns]], use_container_width=True, hide_index=True)
                     
                 with tab2:
@@ -234,7 +235,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         col_ab = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
                         st.dataframe(df_abrangencia_leve[[c for c in col_ab if c in df_abrangencia_leve.columns]], use_container_width=True, hide_index=True)
                         
-                # Adicionado botão para baixar propostas atuais
                 st.divider()
                 st.markdown("### 📥 Download das Propostas Atuais")
                 st.markdown("Baixe um Excel com a abrangência e tabela frete peso atual de cada um dos Leves selecionados.")
@@ -242,7 +242,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 cols_download = st.columns(len(leves_selecionados))
                 for idx, leve in enumerate(leves_selecionados):
                     with cols_download[idx]:
-                        # Prepara dados para download
                         df_abr_dl = df_abrangencia[df_abrangencia['LMC Name'] == leve].copy()
                         df_abr_dl['Routing Code'] = mapa_routing.get(leve, "-")
                         df_abr_dl['SLO Local'] = df_abr_dl['Prazo adicional']
@@ -254,9 +253,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_frete_dl.rename(columns={
                             'label': 'Região de Preço',
                             'on time amount': 'Valor dentro do prazo',
-                            'out of time amount': 'Valor fora do prazo'
+                            'out of time amount': 'Valor fora do prazo',
+                            'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'
                         }, inplace=True)
-                        colunas_frete_dl = ['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']
+                        colunas_frete_dl = ['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']
                         if not df_frete_dl.empty:
                             df_frete_dl = df_frete_dl[colunas_frete_dl]
                             
@@ -871,6 +871,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         
                         st.subheader("2. Tabelas Frete Peso (Todas as Regiões)")
                         df_exibicao_tabela = df_tabela_final.copy()
+                        df_exibicao_tabela.rename(columns={'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'}, inplace=True)
                         df_exibicao_tabela['Valor dentro do prazo'] = df_exibicao_tabela['Valor dentro do prazo'].apply(formatar_moeda)
                         df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
                         st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
