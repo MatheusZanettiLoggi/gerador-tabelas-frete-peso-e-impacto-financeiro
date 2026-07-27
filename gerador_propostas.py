@@ -124,7 +124,7 @@ def extrair_estado(nome_leve):
         return match.group(1)
     return None
 
-def create_pdf_report(nome_destino, estrategia, 
+def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
                       fat_antigo, vol_fat_antigo, tk_fat_antigo,
                       fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
                       loggi_antigo, vol_loggi, tk_loggi_antigo,
@@ -167,6 +167,8 @@ def create_pdf_report(nome_destino, estrategia,
     
     add_line(f"Destino / Lead: {nome_destino}", bold=True, size=11)
     add_line(f"Estrategia Escolhida: {estrategia}", size=10)
+    pdf.ln(2)
+    add_line(f"Municipios Absorvidos: {cidades_movimentadas_str}", size=10)
     pdf.ln(5)
     
     # --- RESUMO FINANCEIRO ---
@@ -651,6 +653,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                                 
                                                 vol_cidade += qtd
                                                 custo_cidade += qtd * preco_on
+                                                
                                             if vol_cidade > 0:
                                                 texto_explicativo.append(f" - {str(cid_ext).title()}: {int(vol_cidade)} pct | Custo Atual: {formatar_moeda(custo_cidade)}")
 
@@ -1055,8 +1058,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("Resumo executivo do simulador para apresentação.")
                             
                             if HAS_FPDF:
+                                cidades_movimentadas_lista = sorted(df_movidos['Cidade'].str.title().unique().tolist())
+                                cidades_movimentadas_str = ", ".join(cidades_movimentadas_lista)
+
                                 pdf_data = create_pdf_report(
-                                    nome_destino_final, estrategia_preco,
+                                    nome_destino_final, estrategia_preco, cidades_movimentadas_str,
                                     global_custo_destino_original, global_vol_destino_original, tk_parceiro_antigo,
                                     global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_crescimento,
                                     custo_loggi_antigo, vol_loggi_total, tk_loggi_antigo,
