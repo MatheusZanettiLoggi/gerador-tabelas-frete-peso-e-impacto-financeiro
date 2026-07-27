@@ -128,13 +128,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
             st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
-            st.markdown("Mesmo com as traduções, as colunas fundamentais não foram encontradas.")
-            st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
             st.stop()
             
         if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
             st.error("🚨 **Atenção: Base de Volume Desatualizada!**")
-            st.markdown("Parece que você fez o upload de uma **versão antiga** da base de volume (sem as colunas `Cidade` e/ou `Faixa pesos`).")
+            st.markdown("Faça o upload da base mais recente com as colunas de Cidade e Faixa Pesos.")
             st.stop()
             
         with st.spinner("Finalizando processamento..."):
@@ -298,34 +296,43 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 # --- PROCESSAMENTO DOS RESULTADOS ---
                 if not df_movidos.empty:
-                    with st.expander("8. Resultados e Impacto Financeiro (Proposta)", expanded=True):
+                    # PREPARAÇÃO DA ABRANGÊNCIA TOTAL DO DESTINO
+                    if tipo_destino == "Um Leve Existente (já selecionado)":
+                        df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
+                        df_abrangencia_existente['Observação'] = "Abrangência Atual"
+                    else:
+                        df_abrangencia_existente = pd.DataFrame(columns=['LMC Name', 'Região de preço', 'Cidade', 'State', 'Observação'])
+
+                    df_movidos_fmt = df_movidos.copy()
+                    df_movidos_fmt['Observação'] = "Migrado de: " + df_movidos_fmt['LMC Name']
+
+                    df_escopo_final = pd.concat([
+                        df_abrangencia_existente[['Cidade', 'State', 'Região de preço', 'Observação']],
+                        df_movidos_fmt[['Cidade', 'State', 'Região de preço', 'Observação']]
+                    ], ignore_index=True).drop_duplicates(subset=['Cidade'])
+                    
+                    slo_base_dest = df_slos_clean[df_slos_clean['Cidade'] == cidade_base_destino]['SLO'].values
+                    slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
+                    
+                    df_escopo_final = df_escopo_final.merge(df_slos_clean[['Cidade', 'SLO']], on='Cidade', how='left')
+                    df_escopo_final['Novo SLO Local'] = df_escopo_final['SLO'] - slo_base_dest_val
+                    df_escopo_final['Novo SLO Local'] = df_escopo_final['Novo SLO Local'].apply(lambda x: x if pd.notnull(x) and x > 0 else 0).astype(int)
+                    
+                    colunas_finais_abrangencia = ['Cidade', 'State', 'Região de preço', 'Novo SLO Local', 'Observação']
+                    
+                    regioes_finais_destino = df_escopo_final['Região de preço'].unique()
+                    regioes_movimentadas = df_movidos['Região de preço'].unique()
+
+                    with st.expander("8. Ajustes Comerciais (Opcional)", expanded=True):
+                        st.markdown("Insira um percentual de reajuste (positivo ou negativo) para as tabelas do Leve de destino, caso tenha sido negociado. Deixe 0 para manter o valor calculado ou a tabela existente.")
+                        ajustes_dict = {}
+                        cols_ajuste = st.columns(3)
+                        for i, regiao in enumerate(sorted(regioes_finais_destino)):
+                            with cols_ajuste[i % 3]:
+                                ajustes_dict[regiao] = st.number_input(f"Ajuste {regiao} (%)", value=0.0, step=0.5, format="%.2f")
+
+                    with st.expander("9. Resultados e Impacto Financeiro (Proposta)", expanded=True):
                         st.success(f"Proposta gerada para **{nome_destino_final}**!")
-                        
-                        if tipo_destino == "Um Leve Existente (já selecionado)":
-                            df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
-                            df_abrangencia_existente['Observação'] = "Abrangência Atual"
-                        else:
-                            df_abrangencia_existente = pd.DataFrame(columns=['LMC Name', 'Região de preço', 'Cidade', 'State', 'Observação'])
-
-                        df_movidos_fmt = df_movidos.copy()
-                        df_movidos_fmt['Observação'] = "Migrado de: " + df_movidos_fmt['LMC Name']
-
-                        df_escopo_final = pd.concat([
-                            df_abrangencia_existente[['Cidade', 'State', 'Região de preço', 'Observação']],
-                            df_movidos_fmt[['Cidade', 'State', 'Região de preço', 'Observação']]
-                        ], ignore_index=True).drop_duplicates(subset=['Cidade'])
-                        
-                        slo_base_dest = df_slos_clean[df_slos_clean['Cidade'] == cidade_base_destino]['SLO'].values
-                        slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
-                        
-                        df_escopo_final = df_escopo_final.merge(df_slos_clean[['Cidade', 'SLO']], on='Cidade', how='left')
-                        df_escopo_final['Novo SLO Local'] = df_escopo_final['SLO'] - slo_base_dest_val
-                        df_escopo_final['Novo SLO Local'] = df_escopo_final['Novo SLO Local'].apply(lambda x: x if pd.notnull(x) and x > 0 else 0).astype(int)
-                        
-                        colunas_finais_abrangencia = ['Cidade', 'State', 'Região de preço', 'Novo SLO Local', 'Observação']
-                        
-                        regioes_finais_destino = df_escopo_final['Região de preço'].unique()
-                        regioes_movimentadas = df_movidos['Região de preço'].unique()
                         
                         lista_novas_tabelas = []
                         texto_explicativo = []
@@ -426,6 +433,15 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
                                 df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_out
                                 
+                                # APLICAÇÃO DO AJUSTE COMERCIAL
+                                ajuste_perc = ajustes_dict.get(regiao, 0.0)
+                                if ajuste_perc != 0.0:
+                                    fator = 1 + (ajuste_perc / 100)
+                                    df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
+                                    df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
+                                    texto_explicativo.append(f"\n>> PASSO 4: Ajuste Comercial")
+                                    texto_explicativo.append(f"Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
+                                
                                 for _, prow in df_regiao_tabela.iterrows():
                                     fx = prow['Faixa de peso (g/m³)']
                                     mult = prow['Multiplicador']
@@ -478,6 +494,34 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 texto_explicativo.append("Nenhuma movimentação nesta região. Tabela atual do Leve mantida.\n")
                                 df_regiao_tabela = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao)].copy()
                                 df_regiao_tabela.rename(columns={'label': 'Região de Preço', 'on time amount': 'Valor dentro do prazo', 'out of time amount': 'Valor fora do prazo'}, inplace=True)
+                                
+                                # APLICAÇÃO DO AJUSTE COMERCIAL MESMO EM TABELAS MANTIDAS
+                                ajuste_perc = ajustes_dict.get(regiao, 0.0)
+                                if ajuste_perc != 0.0:
+                                    fator = 1 + (ajuste_perc / 100)
+                                    df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
+                                    df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
+                                    texto_explicativo.append(f">> Ajuste Comercial: Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
+                                    
+                                    # Calcula impacto se houver ajuste em tabela mantida
+                                    cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
+                                    for _, row in cidades_exist.iterrows():
+                                        cid_ext = row['Cidade']
+                                        vols_cidade = df_volume[(df_volume['Leve'] == nome_destino_final) & (df_volume['Cidade'].astype(str).str.lower() == str(cid_ext).lower())]
+                                        
+                                        for _, v_row in vols_cidade.iterrows():
+                                            faixa_peso = v_row['Faixa pesos']
+                                            qtd_pacotes = v_row['# Total Packages']
+                                            
+                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == faixa_peso)]
+                                            preco_antigo = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
+                                            
+                                            tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso (g/m³)'] == faixa_peso]
+                                            preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
+                                            
+                                            custo_anterior_total += (qtd_pacotes * preco_antigo)
+                                            custo_novo_total += (qtd_pacotes * preco_novo)
+                                            volume_total_pacotes += qtd_pacotes
                             
                             df_regiao_tabela = df_regiao_tabela[['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']]
                             lista_novas_tabelas.append(df_regiao_tabela)
@@ -518,7 +562,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 st.markdown(f"<span style='font-size: 0.9em; color: gray;'>0.00%</span>", unsafe_allow_html=True)
                             
                         with st.expander("🤔 Detalhes do Cálculo & Proporção das Tabelas", expanded=False):
-                            st.markdown("Baixe o memorial descritivo completo para ver exatamente os volumes utilizados, o cálculo da média ponderada e a aplicação da curva padrão nas 23 faixas.")
+                            st.markdown("Baixe o memorial descritivo completo para ver exatamente os volumes utilizados, os reajustes comerciais (se houver) e a aplicação da curva padrão nas 23 faixas.")
                             st.download_button(
                                 label="📄 Baixar Memorial de Cálculo (.txt)",
                                 data=texto_completo_memorial,
