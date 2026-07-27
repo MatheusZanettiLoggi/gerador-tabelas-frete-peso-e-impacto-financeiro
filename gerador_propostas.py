@@ -7,10 +7,22 @@ import io
 import unicodedata
 from datetime import datetime, timezone, timedelta
 
-# Tenta importar a biblioteca de PDF
+# Tenta importar a biblioteca de PDF e cria a classe com Rodapé Customizado
 try:
     from fpdf import FPDF
     HAS_FPDF = True
+    
+    class PDFReport(FPDF):
+        def footer(self):
+            # Posiciona a 1.5 cm do fundo
+            self.set_y(-15)
+            # Define a fonte para itálico, tamanho 8, cor cinza
+            self.set_font('Arial', 'I', 8)
+            self.set_text_color(128, 128, 128)
+            # Texto do rodapé com página e créditos
+            texto_rodape = f'Simulador de Movimentacao de Leves - Desenvolvido por Matheus Zanetti | Pagina {self.page_no()}'
+            self.cell(0, 10, texto_rodape, 0, 0, 'C')
+            
 except ImportError:
     HAS_FPDF = False
 
@@ -39,6 +51,8 @@ with st.sidebar.expander("1. Upload de Bases de Dados", expanded=True):
     st.markdown("**Volume de pacotes (30 dias)**")
     st.markdown("[Link Looker: 26302](https://loggi.looker.com/looks/26302)")
     file_volume = st.file_uploader("Upload Volume", type=["xlsx", "csv"], label_visibility="collapsed")
+
+st.sidebar.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvido por <b>Matheus Zanetti</b></small></div>", unsafe_allow_html=True)
 
 # --- FUNÇÕES DE TRATAMENTO DE DADOS ---
 @st.cache_data
@@ -131,18 +145,20 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
                       loggi_novo, tk_loggi_novo, imp_loggi, perc_imp_loggi,
                       detalhes_reg, df_abrangencia_out, df_tabela_out, tabelas_atuais_pdf):
     
-    # PDF em Paisagem (Landscape)
-    pdf = FPDF(orientation='L', unit='mm', format='A4')
+    # Instancia o PDF customizado em Paisagem (Landscape)
+    pdf = PDFReport(orientation='L', unit='mm', format='A4')
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=20)
     
     def add_line(text, bold=False, size=10, align='L'):
         pdf.set_font("Arial", 'B' if bold else '', size)
+        pdf.set_text_color(0, 0, 0)
         safe_text = unicodedata.normalize('NFKD', str(text)).encode('ascii', 'ignore').decode('ascii')
         pdf.multi_cell(0, 6, safe_text, align=align)
         
     def draw_table(df, col_widths):
         pdf.set_font("Arial", 'B', 9)
+        pdf.set_text_color(0, 0, 0)
         # Cabeçalho
         for col, w in zip(df.columns, col_widths):
             safe_col = unicodedata.normalize('NFKD', str(col)).encode('ascii', 'ignore').decode('ascii')
@@ -162,7 +178,9 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
     # Fuso horário do Brasil (UTC-3)
     fuso_brasilia = timezone(timedelta(hours=-3))
     data_extracao = datetime.now(fuso_brasilia).strftime("%d/%m/%Y as %H:%M")
+    
     add_line(f"Gerado em: {data_extracao}", size=9, align='C')
+    add_line(f"Base de Volumetria: Analise dos ultimos 30 dias", size=9, align='C')
     pdf.ln(5)
     
     add_line(f"Destino / Lead: {nome_destino}", bold=True, size=11)
