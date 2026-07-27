@@ -45,21 +45,39 @@ def load_local_excel(filename):
     return pd.read_excel(filename)
 
 def padronizar_colunas_volume(df):
-    """Remove prefixos do Looker (Ex: 'Charge Leve Leve' -> 'Leve') para evitar quebra do app"""
-    renames = {}
+    """
+    Padroniza as colunas do Looker, independentemente da opção de download escolhida
+    ('With visualization options applied' ou 'As displayed in the data table').
+    """
+    # Mapeamento direto (Nomes brutos do Looker -> Nomes utilizados no código)
+    mapa_colunas = {
+        "Package Charge Leve Last Mile Company Name": "Leve",
+        "Distribution and Expedition Center Locations Routing Code": "Routing Code",
+        "Package Charge Leve Region Label": "Region label",
+        "Package Charge Leve Service Charge Type": "Service Charge Type",
+        "Faixa Pesos": "Faixa pesos",
+        "Package Charge Leve # Packages": "# Total Packages"
+    }
+    
+    # Aplica a renomeação se as colunas com nomes brutos existirem
+    df = df.rename(columns=mapa_colunas)
+    
+    # Fallback de segurança (caso venha com algum outro sufixo inesperado)
+    renames_fallback = {}
     for col in df.columns:
         col_str = str(col)
-        if col_str.endswith("Leve"):
-            renames[col_str] = "Leve"
-        elif col_str.endswith("Routing Code"):
-            renames[col_str] = "Routing Code"
-        elif col_str.endswith("Region label"):
-            renames[col_str] = "Region label"
-        elif col_str.endswith("Total Packages"):
-            renames[col_str] = "# Total Packages"
-        elif col_str.endswith("Faixa pesos"):
-            renames[col_str] = "Faixa pesos"
-    return df.rename(columns=renames)
+        if "Leve" not in df.columns and col_str.endswith("Leve"):
+            renames_fallback[col_str] = "Leve"
+        elif "Routing Code" not in df.columns and col_str.endswith("Routing Code"):
+            renames_fallback[col_str] = "Routing Code"
+        elif "Region label" not in df.columns and col_str.endswith("Region label"):
+            renames_fallback[col_str] = "Region label"
+        elif "# Total Packages" not in df.columns and col_str.endswith("Total Packages"):
+            renames_fallback[col_str] = "# Total Packages"
+        elif "Faixa pesos" not in df.columns and col_str.lower().endswith("faixa pesos"):
+            renames_fallback[col_str] = "Faixa pesos"
+            
+    return df.rename(columns=renames_fallback)
 
 @st.cache_data
 def processar_frete(df_frete):
@@ -116,12 +134,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             
             df_price_var_clean = processar_price_var(df_price_var_raw)
             
-        # VALIDAÇÃO DE SEGURANÇA: Mostra erro amigável se o Looker mudar muito os nomes
+        # VALIDAÇÃO DE SEGURANÇA
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
-            st.error("🚨 **Colunas alteradas no arquivo de Volume!**")
-            st.markdown(f"O aplicativo procurava por colunas terminadas em **'Leve'** e **'Routing Code'**.")
-            st.info(f"📋 **Colunas que vieram no seu arquivo Excel:** `{list(df_volume.columns)}`")
-            st.markdown("> **Dica:** Na hora de exportar do Looker, vá em 'Opções Avançadas' e marque a caixinha **'Remover nome da visualização de dados'**. Se preferir, me avise os novos nomes acima para eu ajustar o código!")
+            st.error("🚨 **Colunas ausentes no arquivo de Volume!**")
+            st.markdown("Mesmo com o dicionário de tradução, as colunas necessárias não foram encontradas.")
+            st.info(f"📋 **Colunas detectadas no seu Excel:** `{list(df_volume.columns)}`")
             st.stop()
             
         with st.spinner("Finalizando processamento..."):
