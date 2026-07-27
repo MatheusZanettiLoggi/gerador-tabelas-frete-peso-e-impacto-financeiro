@@ -56,7 +56,8 @@ def padronizar_colunas_volume(df):
         "Package Charge Leve Region Label": "Region label",
         "Package Charge Leve Service Charge Type": "Service Charge Type",
         "Faixa Pesos": "Faixa pesos",
-        "Package Charge Leve # Packages": "# Total Packages"
+        "Package Charge Leve # Packages": "# Total Packages",
+        "Package Destination City": "Cidade"
     }
     
     # Aplica a renomeação se as colunas com nomes brutos existirem
@@ -76,6 +77,8 @@ def padronizar_colunas_volume(df):
             renames_fallback[col_str] = "# Total Packages"
         elif "Faixa pesos" not in df.columns and col_str.lower().endswith("faixa pesos"):
             renames_fallback[col_str] = "Faixa pesos"
+        elif "Cidade" not in df.columns and (col_str.endswith("Destination City") or col_str.lower().endswith("cidade")):
+            renames_fallback[col_str] = "Cidade"
             
     return df.rename(columns=renames_fallback)
 
