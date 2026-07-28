@@ -662,7 +662,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 as_index=False
             ).agg({
                 '# Total Packages': 'sum',
-                'Cidade': 'first' # Mantém apenas o nome original para exibições de erro
+                'Cidade': 'first'
             })
             df_volume = df_volume_grouped
             
@@ -1500,7 +1500,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 pdf_data = generate_html_pdf(
                                     nome_destino_final, estrategia_preco, cidades_movimentadas_str,
                                     global_custo_destino_original, global_vol_destino_original, tk_parceiro_antigo,
-                                    global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_cresc,
+                                    global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_crescimento,
                                     custo_loggi_antigo, vol_loggi_total, tk_loggi_antigo,
                                     global_custo_novo_total, tk_loggi_novo, impacto_loggi, perc_impacto_loggi,
                                     detalhes_regioes, df_escopo_final[colunas_finais_abrangencia], df_exibicao_tabela,
