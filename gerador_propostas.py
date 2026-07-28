@@ -416,10 +416,16 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_nomes_leves = processar_nomes_leves(df_volume)
             
             # --- AGRUPAMENTO DE VOLUME (Evita duplicação de faixas para a mesma cidade) ---
-            df_volume = df_volume.groupby(
-                ['Leve', 'Routing Code', 'Cidade', 'Cidade_Normalizada', 'Faixa de peso cubado (g)'],
+            # Removemos colunas que podem gerar quebra de grupo extra e forçamos a soma
+            df_volume['Faixa de peso cubado (g)'] = df_volume['Faixa de peso cubado (g)'].astype(str).str.strip()
+            df_volume_grouped = df_volume.groupby(
+                ['Leve', 'Cidade_Normalizada', 'Faixa de peso cubado (g)'],
                 as_index=False
-            )['# Total Packages'].sum()
+            ).agg({
+                '# Total Packages': 'sum',
+                'Cidade': 'first' # Mantém apenas o nome original para exibições de erro
+            })
+            df_volume = df_volume_grouped
             
         st.sidebar.success("Todas as bases carregadas e padronizadas!")
     
