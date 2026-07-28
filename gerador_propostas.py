@@ -155,8 +155,10 @@ def formatar_excel(writer):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
     font_cabecalho = Font(name='Inter', size=10, bold=True)
+    # Alinhamento 100% centralizado e sem quebra de texto (exceder)
     alinhamento = Alignment(horizontal='center', vertical='center', wrap_text=False)
     
+    # Borda fina cinza-claro (D3D3D3)
     borda_cinza = Border(
         left=Side(style='thin', color='D3D3D3'),
         right=Side(style='thin', color='D3D3D3'),
@@ -166,11 +168,12 @@ def formatar_excel(writer):
     
     for sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
-        ws.sheet_view.showGridLines = False 
+        ws.sheet_view.showGridLines = False # Remove as linhas de grade da planilha
         
         col_formats_r1 = {}
         col_formats_r5 = {}
         
+        # Lê os formatos isoladamente para a linha 1
         try:
             for cell in ws[1]:
                 if cell.value and isinstance(cell.value, str):
@@ -184,6 +187,7 @@ def formatar_excel(writer):
         except:
             pass
 
+        # Lê os formatos isoladamente para a linha 5 (Tabela de Auditoria)
         if ws.max_row >= 5:
             try:
                 for cell in ws[5]:
@@ -198,6 +202,7 @@ def formatar_excel(writer):
             except:
                 pass
         
+        # Aplica a formatação em cada célula
         for row in ws.iter_rows():
             ws.row_dimensions[row[0].row].height = 18
             
@@ -207,6 +212,7 @@ def formatar_excel(writer):
                         cell.font = font_cabecalho
                     else:
                         cell.font = font_padrao
+                        # Formata especificamente baseado se está na tabela 1 ou 2
                         if cell.row == 2 and cell.column_letter in col_formats_r1:
                             cell.number_format = col_formats_r1[cell.column_letter]
                         elif cell.row > 5 and cell.column_letter in col_formats_r5:
@@ -215,6 +221,7 @@ def formatar_excel(writer):
                     cell.alignment = alinhamento
                     cell.border = borda_cinza
                     
+        # Auto-ajuste de colunas baseado no maior texto
         for col in ws.columns:
             max_length = 0
             column = col[0].column_letter
@@ -229,16 +236,20 @@ def formatar_excel(writer):
                 adjusted_width = 12
             ws.column_dimensions[column].width = adjusted_width
 
+        # --- FORMATAÇÃO CONDICIONAL (SEMÁFORO DE CUSTO) ---
         if sheet_name == 'Detalhamento Impacto':
+            # Vermelho (Aumento de Custo) e Verde (Economia/Neutro)
             fill_red = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
             font_red = Font(name='Inter', size=10, color='9C0006', bold=True)
             
             fill_green = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
             font_green = Font(name='Inter', size=10, color='006100', bold=True)
             
+            # C2 (Diferença em R$)
             ws.conditional_formatting.add('C2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
             ws.conditional_formatting.add('C2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
             
+            # G2 (Impacto no Budget %)
             ws.conditional_formatting.add('G2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
             ws.conditional_formatting.add('G2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
 
@@ -651,7 +662,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 as_index=False
             ).agg({
                 '# Total Packages': 'sum',
-                'Cidade': 'first'
+                'Cidade': 'first' # Mantém apenas o nome original para exibições de erro
             })
             df_volume = df_volume_grouped
             
@@ -1489,7 +1500,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 pdf_data = generate_html_pdf(
                                     nome_destino_final, estrategia_preco, cidades_movimentadas_str,
                                     global_custo_destino_original, global_vol_destino_original, tk_parceiro_antigo,
-                                    global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_cresresc := perc_cresc,
+                                    global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_cresc,
                                     custo_loggi_antigo, vol_loggi_total, tk_loggi_antigo,
                                     global_custo_novo_total, tk_loggi_novo, impacto_loggi, perc_impacto_loggi,
                                     detalhes_regioes, df_escopo_final[colunas_finais_abrangencia], df_exibicao_tabela,
