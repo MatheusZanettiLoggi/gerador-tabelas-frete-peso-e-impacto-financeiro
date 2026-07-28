@@ -54,7 +54,7 @@ with st.sidebar.expander("1. Upload de Bases de Dados", expanded=True):
 
 st.sidebar.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvido por <b>Matheus Zanetti</b></small></div>", unsafe_allow_html=True)
 
-# --- FUNÇÕES DE TRATAMENTO DE DADOS ---
+# --- FUNÇÕES DE TRATAMENTO E PADRONIZAÇÃO DE DADOS ---
 @st.cache_data
 def load_data(file):
     if file.name.endswith('.csv'):
@@ -73,33 +73,50 @@ def normalize_string(s):
     s = str(s).lower().strip()
     return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
 
+# Padronizações blindadas contra extração do Data Table do Looker
+def padronizar_colunas_frete(df):
+    mapa = {
+        "Leve Contract Region LMC name": "LMC name",
+        "Leve Contract Region table name": "table name",
+        "Leve Contract Region label": "label",
+        "Leve Contract Region on time amount": "on time amount",
+        "Leve Contract Region out of time amount": "out of time amount",
+        "Leve Contract Region service type": "service type"
+    }
+    return df.rename(columns=mapa)
+
+def padronizar_colunas_abrangencia(df):
+    mapa = {
+        "Territorial Scope Pricing Regions LMC Name": "LMC Name",
+        "Territorial Scope Pricing Regions Pricing Region": "Região de preço 2023",
+        "Territorial Scope Pricing Regions City": "Cidade",
+        "Territorial Scope Pricing Regions State": "State",
+        "Territorial Scope Pricing Regions Service Type": "Tipo de serviço",
+        "Territorial Scope Pricing Regions SLO Lastmile": "Prazo adicional"
+    }
+    return df.rename(columns=mapa)
+
+def padronizar_colunas_slos(df):
+    mapa = {
+        "Territorial Scope Pricing Regions City": "Cidade",
+        "Territorial Scope Pricing Regions Pricing Region": "Região de preço 2023",
+        "Territorial Scope Pricing Regions State": "State",
+        "Territorial Scope Pricing Regions Service Type": "Tipo de serviço",
+        "Territorial Scope Pricing Regions SLO": "SLO"
+    }
+    return df.rename(columns=mapa)
+
 def padronizar_colunas_volume(df):
-    mapa_colunas = {
+    mapa = {
         "Package Charge Leve Last Mile Company Name": "Leve",
         "Distribution and Expedition Center Locations Routing Code": "Routing Code",
+        "Package Charge Leve Region label": "Region label",
         "Package Charge Leve Region Label": "Region label",
+        "Package Destination City": "Cidade",
         "Package Charge Leve Service Charge Type": "Service Charge Type",
-        "Faixa Pesos": "Faixa pesos",
-        "Package Charge Leve # Packages": "# Total Packages",
-        "Package Destination City": "Cidade"
+        "Package Charge Leve # Packages": "# Total Packages"
     }
-    df = df.rename(columns=mapa_colunas)
-    renames_fallback = {}
-    for col in df.columns:
-        col_str = str(col)
-        if "Leve" not in df.columns and col_str.endswith("Leve"):
-            renames_fallback[col_str] = "Leve"
-        elif "Routing Code" not in df.columns and col_str.endswith("Routing Code"):
-            renames_fallback[col_str] = "Routing Code"
-        elif "Region label" not in df.columns and col_str.endswith("Region label"):
-            renames_fallback[col_str] = "Region label"
-        elif "# Total Packages" not in df.columns and col_str.endswith("Total Packages"):
-            renames_fallback[col_str] = "# Total Packages"
-        elif "Faixa pesos" not in df.columns and col_str.lower().endswith("faixa pesos"):
-            renames_fallback[col_str] = "Faixa pesos"
-        elif "Cidade" not in df.columns and (col_str.endswith("Destination City") or col_str.lower().endswith("cidade")):
-            renames_fallback[col_str] = "Cidade"
-    return df.rename(columns=renames_fallback)
+    return df.rename(columns=mapa)
 
 @st.cache_data
 def processar_frete(df_frete):
@@ -261,18 +278,22 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_frete = load_data(file_frete)
             df_abrangencia = load_data(file_abrangencia)
             df_slos = load_data(file_slos)
-            
             df_volume = load_data(file_volume)
+            
+            # --- Aplica a padronização blindada contra formatos do Looker ---
+            df_frete = padronizar_colunas_frete(df_frete)
+            df_abrangencia = padronizar_colunas_abrangencia(df_abrangencia)
+            df_slos = padronizar_colunas_slos(df_slos)
             df_volume = padronizar_colunas_volume(df_volume)
             
-        # VALIDAÇÃO MOVIDA PARA ANTES DA NORMALIZAÇÃO
+        # VALIDAÇÃO APÓS A PADRONIZAÇÃO
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
             st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
             st.stop()
             
         if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
             st.error("🚨 **Atenção: Base de Volume Desatualizada ou Incorreta!**")
-            st.markdown("Por favor, verifique se a base de volume extraída possui as colunas de **Package Destination City** (ou Cidade) e **Faixa Pesos**.")
+            st.markdown("Por favor, verifique se a base extraída possui as colunas de **Cidade** e **Faixa Pesos**.")
             st.stop()
             
         with st.spinner("Finalizando processamento..."):
@@ -284,7 +305,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_slos_clean = processar_slos(df_slos)
             df_nomes_leves = processar_nomes_leves(df_volume)
             
-        st.sidebar.success("Todas as bases carregadas!")
+        st.sidebar.success("Todas as bases carregadas e padronizadas!")
     
         with st.expander("2. Seleção de Leves", expanded=True):
             leves_disponiveis = df_frete_clean['LMC name'].dropna().unique().tolist()
