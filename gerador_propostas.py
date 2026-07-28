@@ -9,24 +9,12 @@ from datetime import datetime, timezone, timedelta
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.formatting.rule import CellIsRule
 
-# Tenta importar a biblioteca de PDF e cria a classe com Rodapé Customizado
+# Tenta importar a nova biblioteca de PDF (WeasyPrint)
 try:
-    from fpdf import FPDF
-    HAS_FPDF = True
-    
-    class PDFReport(FPDF):
-        def footer(self):
-            # Posiciona a 1.5 cm do fundo
-            self.set_y(-15)
-            # Define a fonte para itálico, tamanho 8, cor cinza
-            self.set_font('Arial', 'I', 8)
-            self.set_text_color(128, 128, 128)
-            # Texto do rodapé com página e créditos
-            texto_rodape = f'Simulador de Movimentacao de Leves - Desenvolvido por Matheus Zanetti | Pagina {self.page_no()}'
-            self.cell(0, 10, texto_rodape, 0, 0, 'C')
-            
+    import weasyprint
+    HAS_PDF_GENERATOR = True
 except ImportError:
-    HAS_FPDF = False
+    HAS_PDF_GENERATOR = False
 
 st.set_page_config(page_title="Gerador de Propostas - Leves", layout="wide")
 
@@ -167,10 +155,8 @@ def formatar_excel(writer):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
     font_cabecalho = Font(name='Inter', size=10, bold=True)
-    # Alinhamento 100% centralizado e sem quebra de texto (exceder)
     alinhamento = Alignment(horizontal='center', vertical='center', wrap_text=False)
     
-    # Borda fina cinza-claro (D3D3D3)
     borda_cinza = Border(
         left=Side(style='thin', color='D3D3D3'),
         right=Side(style='thin', color='D3D3D3'),
@@ -180,12 +166,11 @@ def formatar_excel(writer):
     
     for sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
-        ws.sheet_view.showGridLines = False # Remove as linhas de grade
+        ws.sheet_view.showGridLines = False 
         
         col_formats_r1 = {}
         col_formats_r5 = {}
         
-        # Lê os formatos isoladamente para a linha 1
         try:
             for cell in ws[1]:
                 if cell.value and isinstance(cell.value, str):
@@ -199,7 +184,6 @@ def formatar_excel(writer):
         except:
             pass
 
-        # Lê os formatos isoladamente para a linha 5 (Tabela de Auditoria)
         if ws.max_row >= 5:
             try:
                 for cell in ws[5]:
@@ -214,7 +198,6 @@ def formatar_excel(writer):
             except:
                 pass
         
-        # Aplica a formatação em cada célula
         for row in ws.iter_rows():
             ws.row_dimensions[row[0].row].height = 18
             
@@ -224,7 +207,6 @@ def formatar_excel(writer):
                         cell.font = font_cabecalho
                     else:
                         cell.font = font_padrao
-                        # Formata especificamente baseado se está na tabela 1 ou 2
                         if cell.row == 2 and cell.column_letter in col_formats_r1:
                             cell.number_format = col_formats_r1[cell.column_letter]
                         elif cell.row > 5 and cell.column_letter in col_formats_r5:
@@ -233,7 +215,6 @@ def formatar_excel(writer):
                     cell.alignment = alinhamento
                     cell.border = borda_cinza
                     
-        # Auto-ajuste de colunas baseado no maior texto
         for col in ws.columns:
             max_length = 0
             column = col[0].column_letter
@@ -248,131 +229,369 @@ def formatar_excel(writer):
                 adjusted_width = 12
             ws.column_dimensions[column].width = adjusted_width
 
-        # --- FORMATAÇÃO CONDICIONAL (SEMÁFORO DE CUSTO) ---
         if sheet_name == 'Detalhamento Impacto':
-            # Vermelho (Aumento de Custo) e Verde (Economia/Neutro)
             fill_red = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
             font_red = Font(name='Inter', size=10, color='9C0006', bold=True)
             
             fill_green = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
             font_green = Font(name='Inter', size=10, color='006100', bold=True)
             
-            # C2 (Diferença em R$)
             ws.conditional_formatting.add('C2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
             ws.conditional_formatting.add('C2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
             
-            # G2 (Impacto no Budget %)
             ws.conditional_formatting.add('G2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
             ws.conditional_formatting.add('G2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
 
 
-def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
+# --- GERADOR DE PDF (COM CORES LOGGI E SETAS) ---
+def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                       fat_antigo, vol_fat_antigo, tk_fat_antigo,
                       fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
                       loggi_antigo, vol_loggi, tk_loggi_antigo,
                       loggi_novo, tk_loggi_novo, imp_loggi, perc_imp_loggi,
                       detalhes_reg, df_abrangencia_out, df_tabela_out, tabelas_atuais_pdf):
-    
-    pdf = PDFReport(orientation='L', unit='mm', format='A4')
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=20)
-    
-    def add_line(text, bold=False, size=10, align='L'):
-        pdf.set_font("Arial", 'B' if bold else '', size)
-        pdf.set_text_color(0, 0, 0)
-        safe_text = unicodedata.normalize('NFKD', str(text)).encode('ascii', 'ignore').decode('ascii')
-        pdf.multi_cell(0, 6, safe_text, align=align)
-        
-    def draw_table(df, col_widths):
-        pdf.set_font("Arial", 'B', 9)
-        pdf.set_text_color(0, 0, 0)
-        for col, w in zip(df.columns, col_widths):
-            safe_col = unicodedata.normalize('NFKD', str(col)).encode('ascii', 'ignore').decode('ascii')
-            pdf.cell(w, 8, safe_col, border=1, align='C')
-        pdf.ln()
-        pdf.set_font("Arial", '', 8)
-        for _, row in df.iterrows():
-            for item, w in zip(row, col_widths):
-                safe_item = unicodedata.normalize('NFKD', str(item)).encode('ascii', 'ignore').decode('ascii')
-                max_chars = int(w * 0.5) 
-                pdf.cell(w, 6, safe_item[:max_chars], border=1, align='C')
-            pdf.ln()
 
-    # --- CABEÇALHO ---
-    add_line("RELATORIO DO SIMULADOR DE MOVIMENTACAO DE LEVES", bold=True, size=14, align='C')
-    fuso_brasilia = timezone(timedelta(hours=-3))
-    data_extracao = datetime.now(fuso_brasilia).strftime("%d/%m/%Y as %H:%M")
+    def format_money(val):
+        return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
-    add_line(f"Gerado em: {data_extracao}", size=9, align='C')
-    add_line(f"Base de Volumetria: Analise dos ultimos 30 dias", size=9, align='C')
-    pdf.ln(5)
-    
-    add_line(f"Destino / Lead: {nome_destino}", bold=True, size=11)
-    add_line(f"Estrategia Escolhida: {estrategia}", size=10)
-    pdf.ln(2)
-    add_line(f"Municipios Absorvidos: {cidades_movimentadas_str}", size=10)
-    pdf.ln(5)
-    
-    # --- RESUMO FINANCEIRO ---
-    add_line("1. VISAO DO PARCEIRO (Faturamento do Leve)", bold=True, size=11)
-    add_line(f"Faturamento Atual: {formatar_moeda(fat_antigo)} (Vol: {int(vol_fat_antigo)} | TK: {formatar_moeda(tk_fat_antigo)})")
-    add_line(f"Novo Faturamento: {formatar_moeda(fat_novo)} (Vol: {int(vol_fat_novo)} | TK: {formatar_moeda(tk_fat_novo)})")
-    add_line(f"Crescimento: {formatar_moeda(cresc_fat)} ({perc_cresc:+.2f}%)")
-    pdf.ln(5)
-    
-    add_line("2. VISAO LOGGI (Impacto Financeiro Real)", bold=True, size=11)
-    add_line(f"Custo Antigo Global: {formatar_moeda(loggi_antigo)} (Vol: {int(vol_loggi)} | TK: {formatar_moeda(tk_loggi_antigo)})")
-    add_line(f"Novo Custo Projetado: {formatar_moeda(loggi_novo)} (Vol: {int(vol_loggi)} | TK: {formatar_moeda(tk_loggi_novo)})")
-    add_line(f"Impacto Financeiro: {formatar_moeda(imp_loggi)} ({perc_imp_loggi:+.2f}%)")
-    pdf.ln(5)
-    
-    add_line("3. DETALHAMENTO POR REGIAO", bold=True, size=11)
-    for reg, dados in detalhes_reg.items():
-        add_line(f"Regiao: {reg}", bold=True)
-        
-        ajuste = dados.get('ajuste', 0.0)
-        if ajuste != 0.0:
-            add_line(f"  - Ajuste Comercial Aplicado: {ajuste:+.2f}%")
+    def format_perc(val):
+        return f"{abs(val):.2f}%"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Relatório de Simulação</title>
+        <style>
+            @page {{
+                size: A4;
+                margin: 20mm 15mm;
+                background-color: #fdfbf7;
+                @bottom-center {{
+                    content: "Simulador de Movimentação de Leves - Desenvolvido por Matheus Zanetti | Página " counter(page);
+                    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                    font-size: 8pt;
+                    color: #888888;
+                    font-style: italic;
+                }}
+            }}
+            body {{
+                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                margin: 0;
+                padding: 0;
+                color: #333333;
+                background-color: #fdfbf7;
+                font-size: 10pt;
+                line-height: 1.5;
+            }}
+            *, *::before, *::after {{
+                box-sizing: border-box;
+            }}
             
-        tk_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
-        tk_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
-        imp_r = dados['custo_novo'] - dados['custo_antigo']
-        perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
-        add_line(f"  - Custo Antigo: {formatar_moeda(dados['custo_antigo'])} (TK: {formatar_moeda(tk_ant)})")
-        add_line(f"  - Novo Custo: {formatar_moeda(dados['custo_novo'])} (TK: {formatar_moeda(tk_nov)})")
-        add_line(f"  - Variacao: {formatar_moeda(imp_r)} ({perc_r:+.2f}%)")
-        pdf.ln(2)
+            /* Typography & Loggi Colors */
+            h1 {{
+                color: #002766; /* Loggi Dark Blue */
+                font-size: 18pt;
+                text-align: center;
+                margin-top: 0;
+                margin-bottom: 5px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }}
+            h2 {{
+                color: #006aff; /* Loggi Blue */
+                font-size: 13pt;
+                border-bottom: 2px solid #00baff; /* Loggi Light Blue */
+                padding-bottom: 4px;
+                margin-top: 25px;
+                margin-bottom: 15px;
+            }}
+            h3 {{
+                color: #002766;
+                font-size: 11pt;
+                margin-top: 15px;
+                margin-bottom: 8px;
+            }}
+            
+            .header-meta {{
+                text-align: center;
+                color: #666;
+                font-size: 9pt;
+                margin-bottom: 25px;
+            }}
+            .context-box {{
+                background-color: #ffffff;
+                border-left: 4px solid #00baff;
+                padding: 12px 15px;
+                margin-bottom: 25px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            }}
+            .context-item {{
+                margin-bottom: 6px;
+            }}
+            .label {{
+                font-weight: bold;
+                color: #002766;
+            }}
 
-    pdf.add_page()
+            .card-container {{
+                display: block;
+                width: 100%;
+                margin-bottom: 20px;
+                page-break-inside: avoid;
+            }}
+            .card {{
+                background-color: #ffffff;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                padding: 15px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+            }}
+            .metric-row {{
+                display: block;
+                width: 100%;
+                margin-bottom: 8px;
+            }}
+            .metric-label {{
+                display: inline-block;
+                width: 180px;
+                color: #555;
+            }}
+            .metric-value {{
+                display: inline-block;
+                font-weight: bold;
+                color: #222;
+            }}
+            .metric-sub {{
+                color: #888;
+                font-size: 8.5pt;
+                margin-left: 10px;
+                font-weight: normal;
+            }}
+            
+            /* Arrow indicators */
+            .arrow-up-green {{ color: #09ab3b; font-weight: bold; }}
+            .arrow-down-green {{ color: #09ab3b; font-weight: bold; }}
+            .arrow-up-red {{ color: #ff4b4b; font-weight: bold; }}
+            .arrow-down-red {{ color: #ff4b4b; font-weight: bold; }}
+            .arrow-neutral {{ color: #888888; font-weight: bold; }}
+
+            .region-block {{
+                background-color: #ffffff;
+                border: 1px solid #e0e0e0;
+                padding: 12px;
+                margin-bottom: 10px;
+                page-break-inside: avoid;
+            }}
+            .region-title {{
+                font-weight: bold;
+                color: #006aff;
+                margin-bottom: 8px;
+                font-size: 10.5pt;
+            }}
+            .region-alert {{
+                color: #e67e22;
+                font-weight: bold;
+                font-size: 9pt;
+                margin-bottom: 8px;
+            }}
+            
+            table {{
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                background-color: #ffffff;
+                font-size: 8.5pt;
+            }}
+            th {{
+                background-color: #002766;
+                color: #ffffff;
+                font-weight: bold;
+                text-align: center;
+                padding: 8px 5px;
+                border: 1px solid #002766;
+            }}
+            td {{
+                padding: 6px 5px;
+                border: 1px solid #e0e0e0;
+                text-align: center;
+            }}
+            tr:nth-child(even) {{
+                background-color: #f9fbfd;
+            }}
+            
+            .page-break {{
+                page-break-before: always;
+            }}
+        </style>
+    </head>
+    <body>
+    """
+
+    fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
+    data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
     
-    # --- TABELAS PROJETADAS ---
-    add_line(f"4. ABRANGENCIA COMPLETA PROJETADA: {nome_destino}", bold=True, size=11)
-    pdf.ln(2)
+    html_content += f"""
+        <h1>Relatório do Simulador de Movimentação de Leves</h1>
+        <div class="header-meta">
+            Gerado em: {data_extracao}<br>
+            Base de Volumetria: Análise dos últimos 30 dias
+        </div>
+        
+        <div class="context-box">
+            <div class="context-item"><span class="label">Destino / Lead:</span> {nome_destino}</div>
+            <div class="context-item"><span class="label">Estratégia Escolhida:</span> {estrategia}</div>
+            <div class="context-item"><span class="label">Municípios Absorvidos:</span> {cidades_movimentadas_str}</div>
+        </div>
+    """
+
+    # --- Lógica de Cores para as Setinhas ---
+    def get_indicator(val, is_cost=False):
+        if val > 0:
+            return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">▲ +{format_money(val)}</span>'
+        elif val < 0:
+            return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">▼ -{format_money(abs(val))}</span>'
+        return f'<span class="arrow-neutral">■ {format_money(val)}</span>'
+
+    def get_perc_indicator(val, is_cost=False):
+        if val > 0:
+            return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">(+{format_perc(val)})</span>'
+        elif val < 0:
+            return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">(-{format_perc(val)})</span>'
+        return f'<span class="arrow-neutral">(0.00%)</span>'
+
+    # --- 1. Parceiro ---
+    html_content += f"""
+        <h2>1. VISÃO DO PARCEIRO (Faturamento do Leve)</h2>
+        <div class="card-container">
+            <div class="card">
+                <div class="metric-row">
+                    <span class="metric-label">Faturamento Atual:</span>
+                    <span class="metric-value">{format_money(fat_antigo)}</span>
+                    <span class="metric-sub">(Vol: {int(vol_fat_antigo):,} | TK: {format_money(tk_fat_antigo)})</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Novo Faturamento:</span>
+                    <span class="metric-value">{format_money(fat_novo)}</span>
+                    <span class="metric-sub">(Vol: {int(vol_fat_novo):,} | TK: {format_money(tk_fat_novo)})</span>
+                </div>
+                <div class="metric-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee;">
+                    <span class="metric-label">Crescimento da Operação:</span>
+                    <span class="metric-value">{get_indicator(cresc_fat, False)} {get_perc_indicator(perc_cresc, False)}</span>
+                </div>
+            </div>
+        </div>
+    """
+
+    # --- 2. Loggi ---
+    html_content += f"""
+        <h2>2. VISÃO LOGGI (Impacto Financeiro Real)</h2>
+        <div class="card-container">
+            <div class="card">
+                <div class="metric-row">
+                    <span class="metric-label">Custo Antigo Global:</span>
+                    <span class="metric-value">{format_money(loggi_antigo)}</span>
+                    <span class="metric-sub">(Vol: {int(vol_loggi):,} | TK: {format_money(tk_loggi_antigo)})</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Novo Custo Projetado:</span>
+                    <span class="metric-value">{format_money(loggi_novo)}</span>
+                    <span class="metric-sub">(Vol: {int(vol_loggi):,} | TK: {format_money(tk_loggi_novo)})</span>
+                </div>
+                <div class="metric-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee;">
+                    <span class="metric-label">Impacto Financeiro:</span>
+                    <span class="metric-value">{get_indicator(imp_loggi, True)} {get_perc_indicator(perc_imp_loggi, True)}</span>
+                </div>
+            </div>
+        </div>
+    """
+
+    # --- 3. Detalhamento ---
+    html_content += """<h2>3. DETALHAMENTO POR REGIÃO</h2>"""
+    
+    if detalhes_reg:
+        for reg, dados in detalhes_reg.items():
+            tk_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
+            tk_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
+            imp_r = dados['custo_novo'] - dados['custo_antigo']
+            perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
+            
+            ajuste = dados.get('ajuste', 0.0)
+            ajuste_html = f'<div class="region-alert">⚠️ Ajuste Comercial Aplicado: {ajuste:+.2f}%</div>' if ajuste != 0.0 else ''
+            
+            html_content += f"""
+            <div class="region-block">
+                <div class="region-title">📍 Região: {reg}</div>
+                {ajuste_html}
+                <div class="metric-row">
+                    <span class="metric-label">Custo Antigo:</span>
+                    <span class="metric-value">{format_money(dados['custo_antigo'])}</span>
+                    <span class="metric-sub">(TK: {format_money(tk_ant)})</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Novo Custo:</span>
+                    <span class="metric-value">{format_money(dados['custo_novo'])}</span>
+                    <span class="metric-sub">(TK: {format_money(tk_nov)})</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">Variação no Budget:</span>
+                    <span class="metric-value">{get_indicator(imp_r, True)} {get_perc_indicator(perc_r, True)}</span>
+                </div>
+            </div>
+            """
+    else:
+        html_content += "<p>Nenhum detalhamento de região disponível.</p>"
+
+
+    # --- Função Geradora de Tabelas HTML ---
+    def generate_html_table(df):
+        if df is None or df.empty: return "<p>Sem dados.</p>"
+        html = "<table><thead><tr>"
+        for col in df.columns:
+            html += f"<th>{col}</th>"
+        html += "</tr></thead><tbody>"
+        for _, row in df.iterrows():
+            html += "<tr>"
+            for val in row:
+                html += f"<td>{val}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+        return html
+
+    # --- 4. Abrangencia ---
+    html_content += f"""
+        <div class="page-break"></div>
+        <h2>4. ABRANGÊNCIA COMPLETA PROJETADA: {nome_destino}</h2>
+    """
     colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
-    widths_abr = [70, 50, 30, 100] 
-    draw_table(df_abrangencia_out[colunas_abr_pdf], widths_abr)
-    
-    pdf.add_page()
-    
-    add_line(f"5. TABELA FRETE PESO PROJETADA: {nome_destino}", bold=True, size=11)
-    pdf.ln(2)
-    widths_frete = [50, 70, 70, 70] 
-    draw_table(df_tabela_out, widths_frete)
+    html_content += generate_html_table(df_abrangencia_out[colunas_abr_pdf])
 
-    # --- TABELAS ATUAIS (NOVA SEÇÃO 6) ---
+    # --- 5. Tabela Frete ---
+    html_content += f"""
+        <div class="page-break"></div>
+        <h2>5. TABELA FRETE PESO PROJETADA: {nome_destino}</h2>
+    """
+    html_content += generate_html_table(df_tabela_out)
+
+    # --- 6. Tabelas Atuais ---
     if tabelas_atuais_pdf:
-        pdf.add_page()
-        add_line("6. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)", bold=True, size=11)
+        html_content += f"""
+            <div class="page-break"></div>
+            <h2>6. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>
+        """
         for leve_nome, df_tab in tabelas_atuais_pdf.items():
-            pdf.ln(4)
-            add_line(f"Leve Atual: {leve_nome}", bold=True, size=10)
-            pdf.ln(2)
-            draw_table(df_tab, widths_frete)
+            html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
+            html_content += generate_html_table(df_tab)
 
-    pdf_out = pdf.output(dest="S")
-    if isinstance(pdf_out, str):
-        return pdf_out.encode("latin-1")
-    return bytes(pdf_out)
+    html_content += """
+    </body>
+    </html>
+    """
+    
+    # Gera os bytes do PDF usando WeasyPrint diretamente da string HTML
+    pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
+    return pdf_bytes
 
 
 # --- FLUXO PRINCIPAL ---
@@ -1249,14 +1468,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("### 📄 Relatório Executivo")
                             st.markdown("Resumo executivo do simulador para apresentação.")
                             
-                            if HAS_FPDF:
+                            if HAS_PDF_GENERATOR:
                                 if not df_movidos.empty:
                                     cidades_movimentadas_lista = sorted(df_movidos['Cidade'].str.title().unique().tolist())
                                     cidades_movimentadas_str = ", ".join(cidades_movimentadas_lista)
                                 else:
                                     cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
 
-                                pdf_data = create_pdf_report(
+                                pdf_data = generate_html_pdf(
                                     nome_destino_final, estrategia_preco, cidades_movimentadas_str,
                                     global_custo_destino_original, global_vol_destino_original, tk_parceiro_antigo,
                                     global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_crescimento,
@@ -1270,10 +1489,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     data=pdf_data,
                                     file_name=f"Relatorio_Simulacao_{nome_destino_final.replace(' ', '_')}.pdf",
                                     mime="application/pdf",
-                                    type="secondary"
+                                    type="primary"
                                 )
                             else:
-                                st.warning("Instale a biblioteca 'fpdf' (pip install fpdf) para liberar a exportação em PDF.")
+                                st.warning("Instale a biblioteca 'weasyprint' (pip install weasyprint) para liberar a exportação em PDF.")
 
 else:
     st.info("Por favor, faça o upload de **todas as 4 bases** na barra lateral para prosseguir.")
