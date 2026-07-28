@@ -265,21 +265,21 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_volume = load_data(file_volume)
             df_volume = padronizar_colunas_volume(df_volume)
             
-            df_volume['Cidade_Normalizada'] = df_volume['Cidade'].apply(normalize_string)
-            df_abrangencia['Cidade_Normalizada'] = df_abrangencia['Cidade'].apply(normalize_string)
-            
-            df_price_var_clean = processar_price_var(df_price_var_raw)
-            
+        # VALIDAÇÃO MOVIDA PARA ANTES DA NORMALIZAÇÃO
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
             st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
             st.stop()
             
         if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
-            st.error("🚨 **Atenção: Base de Volume Desatualizada!**")
-            st.markdown("Faça o upload da base mais recente com as colunas de Cidade e Faixa Pesos.")
+            st.error("🚨 **Atenção: Base de Volume Desatualizada ou Incorreta!**")
+            st.markdown("Por favor, verifique se a base de volume extraída possui as colunas de **Package Destination City** (ou Cidade) e **Faixa Pesos**.")
             st.stop()
             
         with st.spinner("Finalizando processamento..."):
+            df_volume['Cidade_Normalizada'] = df_volume['Cidade'].apply(normalize_string)
+            df_abrangencia['Cidade_Normalizada'] = df_abrangencia['Cidade'].apply(normalize_string)
+            
+            df_price_var_clean = processar_price_var(df_price_var_raw)
             df_frete_clean = processar_frete(df_frete)
             df_slos_clean = processar_slos(df_slos)
             df_nomes_leves = processar_nomes_leves(df_volume)
