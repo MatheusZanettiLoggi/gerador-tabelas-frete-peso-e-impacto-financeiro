@@ -9,7 +9,7 @@ from datetime import datetime, timezone, timedelta
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.formatting.rule import CellIsRule
 
-# Tenta importar a nova biblioteca de PDF (WeasyPrint)
+# Tenta importar as bibliotecas de PDF
 try:
     import weasyprint
     HAS_PDF_GENERATOR = True
@@ -243,7 +243,7 @@ def formatar_excel(writer):
             ws.conditional_formatting.add('G2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
 
 
-# --- GERADOR DE PDF (COM CORES LOGGI E SETAS) ---
+# --- GERADOR DE PDF (COM IDENTIDADE VISUAL LOGGI E LEBRE) ---
 def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                       fat_antigo, vol_fat_antigo, tk_fat_antigo,
                       fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
@@ -262,26 +262,34 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
-        <title>Relatório de Simulação</title>
+        <title>Relatório de Simulação - Loggi</title>
         <style>
             @page {{
                 size: A4;
                 margin: 20mm 15mm;
-                background-color: #fdfbf7;
+                background-color: #ffffff;
+                @top-right {{
+                    content: "";
+                    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="24" height="24"><path fill="%2300baff" d="M256 0C114.6 0 0 114.6 0 256s114.6 256 256 256 256-114.6 256-256S397.4 0 256 0zM384.3 322.2c-5.7 13.1-15.5 24-28.1 30.6-12.7 6.7-27.2 8.4-41.1 5-30.8-7.7-56.1-27.9-71.9-55.2-15.8-27.3-21.2-59.5-15.2-90.8 1.4-7.2 4.2-14 8.2-20.1-28.6 15.6-48.4 46.1-50.6 81.3-.4 6.9-1.2 13.8-2.3 20.6-2.5 15.5-10.4 29.5-22.3 39.7-11.9 10.2-27.1 15.6-42.6 15.1-15.5-.5-30.3-6.6-41.5-17.4-11.2-10.8-18.1-25.6-19.1-41.4-.9-15.8 3.5-31.5 12.5-44.8 9-13.3 22.1-23.4 37.3-28.4 15.2-5 31.7-4.6 46.6.9 7.4 2.7 14.3 6.6 20.6 11.5 3.1-25.3 16.8-48.2 38.3-63.5 21.5-15.3 48.3-22 75-18.7 26.7 3.3 50.7 16.5 67.3 37.1 16.6 20.6 24.6 47 22.3 73.2-.4 4.5-1.1 9-2.1 13.4 11.3-4.5 23.3-6.3 35.3-5.3 12 1 23.6 5.8 32.9 13.7 9.3 7.9 16 18.5 19.1 30.3 3.1 11.8 2.5 24.4-1.7 35.8z"/></svg>');
+                    background-repeat: no-repeat;
+                    background-position: right center;
+                    width: 30px;
+                    height: 30px;
+                }}
                 @bottom-center {{
                     content: "Simulador de Movimentação de Leves - Desenvolvido por Matheus Zanetti | Página " counter(page);
-                    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                    font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif;
                     font-size: 8pt;
                     color: #888888;
                     font-style: italic;
                 }}
             }}
             body {{
-                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+                font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif;
                 margin: 0;
                 padding: 0;
-                color: #333333;
-                background-color: #fdfbf7;
+                color: #000000;
+                background-color: #ffffff;
                 font-size: 10pt;
                 line-height: 1.5;
             }}
@@ -289,15 +297,16 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 box-sizing: border-box;
             }}
             
-            /* Typography & Loggi Colors */
+            /* Tipografia e Identidade Visual Loggi */
             h1 {{
                 color: #002766; /* Loggi Dark Blue */
                 font-size: 18pt;
                 text-align: center;
-                margin-top: 0;
+                margin-top: 10px;
                 margin-bottom: 5px;
                 text-transform: uppercase;
                 letter-spacing: 1px;
+                font-weight: 700;
             }}
             h2 {{
                 color: #006aff; /* Loggi Blue */
@@ -306,12 +315,14 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 padding-bottom: 4px;
                 margin-top: 25px;
                 margin-bottom: 15px;
+                font-weight: 600;
             }}
             h3 {{
                 color: #002766;
                 font-size: 11pt;
                 margin-top: 15px;
                 margin-bottom: 8px;
+                font-weight: 600;
             }}
             
             .header-meta {{
@@ -322,10 +333,11 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
             }}
             .context-box {{
                 background-color: #ffffff;
+                border: 1px solid #e0e0e0;
                 border-left: 4px solid #00baff;
                 padding: 12px 15px;
                 margin-bottom: 25px;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+                box-shadow: 0 1px 3px rgba(0,0,0,0.02);
             }}
             .context-item {{
                 margin-bottom: 6px;
@@ -346,7 +358,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 border: 1px solid #e0e0e0;
                 border-radius: 6px;
                 padding: 15px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+                box-shadow: 0 2px 4px rgba(0,0,0,0.02);
             }}
             .metric-row {{
                 display: block;
@@ -355,22 +367,22 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
             }}
             .metric-label {{
                 display: inline-block;
-                width: 180px;
+                width: 190px;
                 color: #555;
             }}
             .metric-value {{
                 display: inline-block;
                 font-weight: bold;
-                color: #222;
+                color: #000000;
             }}
             .metric-sub {{
-                color: #888;
+                color: #777;
                 font-size: 8.5pt;
                 margin-left: 10px;
                 font-weight: normal;
             }}
             
-            /* Arrow indicators */
+            /* Indicadores com Cores Loggi */
             .arrow-up-green {{ color: #09ab3b; font-weight: bold; }}
             .arrow-down-green {{ color: #09ab3b; font-weight: bold; }}
             .arrow-up-red {{ color: #ff4b4b; font-weight: bold; }}
@@ -380,6 +392,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
             .region-block {{
                 background-color: #ffffff;
                 border: 1px solid #e0e0e0;
+                border-radius: 4px;
                 padding: 12px;
                 margin-bottom: 10px;
                 page-break-inside: avoid;
@@ -416,9 +429,10 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 padding: 6px 5px;
                 border: 1px solid #e0e0e0;
                 text-align: center;
+                color: #333333;
             }}
             tr:nth-child(even) {{
-                background-color: #f9fbfd;
+                background-color: #f4f8fb;
             }}
             
             .page-break {{
@@ -446,7 +460,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
         </div>
     """
 
-    # --- Lógica de Cores para as Setinhas ---
     def get_indicator(val, is_cost=False):
         if val > 0:
             return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">▲ +{format_money(val)}</span>'
@@ -476,7 +489,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                     <span class="metric-value">{format_money(fat_novo)}</span>
                     <span class="metric-sub">(Vol: {int(vol_fat_novo):,} | TK: {format_money(tk_fat_novo)})</span>
                 </div>
-                <div class="metric-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee;">
+                <div class="metric-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e0e0e0;">
                     <span class="metric-label">Crescimento da Operação:</span>
                     <span class="metric-value">{get_indicator(cresc_fat, False)} {get_perc_indicator(perc_cresc, False)}</span>
                 </div>
@@ -499,7 +512,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                     <span class="metric-value">{format_money(loggi_novo)}</span>
                     <span class="metric-sub">(Vol: {int(vol_loggi):,} | TK: {format_money(tk_loggi_novo)})</span>
                 </div>
-                <div class="metric-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #eee;">
+                <div class="metric-row" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed #e0e0e0;">
                     <span class="metric-label">Impacto Financeiro:</span>
                     <span class="metric-value">{get_indicator(imp_loggi, True)} {get_perc_indicator(perc_imp_loggi, True)}</span>
                 </div>
@@ -543,8 +556,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     else:
         html_content += "<p>Nenhum detalhamento de região disponível.</p>"
 
-
-    # --- Função Geradora de Tabelas HTML ---
     def generate_html_table(df):
         if df is None or df.empty: return "<p>Sem dados.</p>"
         html = "<table><thead><tr>"
@@ -589,7 +600,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     </html>
     """
     
-    # Gera os bytes do PDF usando WeasyPrint diretamente da string HTML
     pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
     return pdf_bytes
 
@@ -635,14 +645,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_nomes_leves = processar_nomes_leves(df_volume)
             
             # --- AGRUPAMENTO DE VOLUME (Evita duplicação de faixas para a mesma cidade) ---
-            # Removemos colunas que podem gerar quebra de grupo extra e forçamos a soma
             df_volume['Faixa de peso cubado (g)'] = df_volume['Faixa de peso cubado (g)'].astype(str).str.strip()
             df_volume_grouped = df_volume.groupby(
                 ['Leve', 'Cidade_Normalizada', 'Faixa de peso cubado (g)'],
                 as_index=False
             ).agg({
                 '# Total Packages': 'sum',
-                'Cidade': 'first' # Mantém apenas o nome original para exibições de erro
+                'Cidade': 'first'
             })
             df_volume = df_volume_grouped
             
@@ -864,7 +873,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     estrategia_preco = None
                     tabela_base_selecionada = None
                     
-                    # Identifica se é apenas um Reajuste Comercial na tabela atual do Leve
                     if df_movidos.empty and tipo_destino == "Um Novo Lead":
                         st.warning("Nenhum município foi movimentado para o Novo Lead ainda. Selecione cidades no Passo 6 para continuar.")
                     elif df_movidos.empty and tipo_destino == "Um Leve Existente (já selecionado)":
@@ -1262,6 +1270,9 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             df_auditoria_excel = df_auditoria_excel.sort_values(
                                 by=['Tipo', 'LMC Atual / Origem', 'Região de Preço', 'Cidade', 'Faixa de peso cubado (g)']
                             )
+                            # Reorganiza as colunas para o Routing Code ficar entre LMC e Região de Preço
+                            cols_auditoria = ['Tipo', 'LMC Atual / Origem', 'Routing Code', 'Região de Preço', 'Cidade', 'Faixa de peso cubado (g)', 'Pacotes (30 dias)', 'Tarifa Antiga (R$)', 'Tarifa Base Destino (R$)', 'Ajuste Comercial (%)', 'Tarifa Nova Projetada (R$)', 'Custo Antigo Total (R$)', 'Novo Custo Total (R$)', 'Diferença (R$)']
+                            df_auditoria_excel = df_auditoria_excel[[c for c in cols_auditoria if c in df_auditoria_excel.columns]]
 
                         # --- ALERTAS DE MISROUTES / PACOTES IGNORADOS ---
                         ignorado_info = []
@@ -1478,7 +1489,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 pdf_data = generate_html_pdf(
                                     nome_destino_final, estrategia_preco, cidades_movimentadas_str,
                                     global_custo_destino_original, global_vol_destino_original, tk_parceiro_antigo,
-                                    global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_crescimento,
+                                    global_custo_novo_total, vol_parceiro_novo, tk_parceiro_novo, crescimento_parceiro, perc_cresresc := perc_cresc,
                                     custo_loggi_antigo, vol_loggi_total, tk_loggi_antigo,
                                     global_custo_novo_total, tk_loggi_novo, impacto_loggi, perc_impacto_loggi,
                                     detalhes_regioes, df_escopo_final[colunas_finais_abrangencia], df_exibicao_tabela,
