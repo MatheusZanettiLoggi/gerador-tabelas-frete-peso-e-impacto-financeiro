@@ -263,6 +263,10 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                       loggi_novo, tk_loggi_novo, imp_loggi, perc_imp_loggi,
                       detalhes_reg, df_abrangencia_out, df_tabela_out, tabelas_atuais_pdf):
 
+    # Blinda a geração da data logo na primeira linha
+    fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
+    data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
+
     def format_money(val):
         return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
@@ -454,9 +458,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     </head>
     <body>
     {logo_html}
-    """
     
-    html_content += f"""
         <h1>Relatório do Simulador de Movimentação de Leves</h1>
         <div class="header-meta">
             Gerado em: {data_extracao}<br>
