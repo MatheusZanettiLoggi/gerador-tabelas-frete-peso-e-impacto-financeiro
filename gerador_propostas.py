@@ -903,6 +903,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         registros_auditoria.append({
                                             'Tipo': 'Cidades Migradas (Origem)',
                                             'LMC Atual / Origem': leve_orig,
+                                            'Routing Code': mapa_routing.get(leve_orig, "-"),
                                             'Região de Preço': regiao,
                                             'Cidade': str(cid_movida).title(),
                                             'Faixa de peso cubado (g)': faixa_peso,
@@ -943,6 +944,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             registros_auditoria.append({
                                                 'Tipo': 'Cidades Atuais do Destino',
                                                 'LMC Atual / Origem': nome_destino_final,
+                                                'Routing Code': mapa_routing.get(nome_destino_final, "-"),
                                                 'Região de Preço': regiao,
                                                 'Cidade': str(cid_ext).title(),
                                                 'Faixa de peso cubado (g)': faixa_peso,
@@ -1007,6 +1009,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             registros_auditoria.append({
                                                 'Tipo': 'Cidades Atuais do Destino',
                                                 'LMC Atual / Origem': nome_destino_final,
+                                                'Routing Code': mapa_routing.get(nome_destino_final, "-"),
                                                 'Região de Preço': regiao,
                                                 'Cidade': str(cid_ext).title(),
                                                 'Faixa de peso cubado (g)': faixa_peso,
