@@ -82,7 +82,9 @@ def padronizar_colunas_frete(df):
         "Leve Contract Region label": "label",
         "Leve Contract Region on time amount": "on time amount",
         "Leve Contract Region out of time amount": "out of time amount",
-        "Leve Contract Region service type": "service type"
+        "Leve Contract Region service type": "service type",
+        "Leve Contract Region Faixa de peso (g/m³)": "Faixa de peso cubado (g)",
+        "Faixa de peso (g/m³)": "Faixa de peso cubado (g)"
     }
     return df.rename(columns=mapa)
 
@@ -115,7 +117,10 @@ def padronizar_colunas_volume(df):
         "Package Charge Leve Region Label": "Region label",
         "Package Destination City": "Cidade",
         "Package Charge Leve Service Charge Type": "Service Charge Type",
-        "Package Charge Leve # Packages": "# Total Packages"
+        "Package Charge Leve # Packages": "# Total Packages",
+        "Faixa pesos": "Faixa de peso cubado (g)",
+        "Faixa Pesos": "Faixa de peso cubado (g)",
+        "Package Charge Leve Faixa pesos": "Faixa de peso cubado (g)"
     }
     return df.rename(columns=mapa)
 
@@ -141,7 +146,7 @@ def processar_nomes_leves(df_volume):
 
 @st.cache_data
 def processar_price_var(df_price):
-    df_price.columns = ['Faixa de peso (g/m³)', 'Multiplicador']
+    df_price.columns = ['Faixa de peso cubado (g)', 'Multiplicador']
     return df_price
 
 def formatar_moeda(valor):
@@ -176,7 +181,7 @@ def formatar_excel(writer):
         ws = workbook[sheet_name]
         ws.sheet_view.showGridLines = False # Remove as linhas de grade da planilha
         
-        # Leitor inteligente de formatos baseados no nome da coluna (Cabeçalhos geralmente nas linhas 1 ou 5)
+        # Leitor inteligente de formatos baseados no nome da coluna
         col_formats = {}
         for r in [1, 5]:
             try:
@@ -187,31 +192,28 @@ def formatar_excel(writer):
                             col_formats[cell.column_letter] = 'R$ #,##0.00'
                         elif "(%)" in val_str:
                             col_formats[cell.column_letter] = '0.00%'
-                        elif "(Pacotes)" in val_str:
+                        elif "(Pacotes)" in val_str or "Pacotes (30 dias)" in val_str:
                             col_formats[cell.column_letter] = '#,##0'
             except:
                 pass
         
-        # Aplica a formatação de fonte, alinhamento, borda e formato de número em cada célula
+        # Aplica a formatação em cada célula
         for row in ws.iter_rows():
-            # Define altura padrão fixa para todas as linhas para ficarem uniformes
             ws.row_dimensions[row[0].row].height = 18
             
             for cell in row:
                 if cell.value is not None:
-                    # Negrito na primeira linha, ou na linha 5 do detalhamento analítico
                     if cell.row == 1 or (sheet_name == 'Detalhamento Impacto' and cell.row == 5):
                         cell.font = font_cabecalho
                     else:
                         cell.font = font_padrao
-                        # Aplica a formatação nativa de Moeda ou Porcentagem do Excel
                         if cell.column_letter in col_formats:
                             cell.number_format = col_formats[cell.column_letter]
                             
                     cell.alignment = alinhamento
                     cell.border = borda_cinza
                     
-        # Auto-ajuste de colunas baseado no maior texto (sem limite de largura)
+        # Auto-ajuste de colunas baseado no maior texto
         for col in ws.columns:
             max_length = 0
             column = col[0].column_letter
@@ -221,7 +223,6 @@ def formatar_excel(writer):
                         max_length = len(str(cell.value))
                 except:
                     pass
-            # Dá um respiro e aplica a largura para acomodar o texto inteiro
             adjusted_width = (max_length + 2) * 1.15
             if adjusted_width < 12:
                 adjusted_width = 12
@@ -264,7 +265,6 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
 
     # --- CABEÇALHO ---
     add_line("RELATORIO DO SIMULADOR DE MOVIMENTACAO DE LEVES", bold=True, size=14, align='C')
-    # Fuso horário do Brasil (UTC-3)
     fuso_brasilia = timezone(timedelta(hours=-3))
     data_extracao = datetime.now(fuso_brasilia).strftime("%d/%m/%Y as %H:%M")
     
@@ -313,7 +313,6 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
     # --- TABELAS PROJETADAS ---
     add_line(f"4. ABRANGENCIA COMPLETA PROJETADA: {nome_destino}", bold=True, size=11)
     pdf.ln(2)
-    # A exclusão do "State" também entra aqui na visualização do PDF final
     colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
     widths_abr = [70, 50, 30, 100] 
     draw_table(df_abrangencia_out[colunas_abr_pdf], widths_abr)
@@ -365,7 +364,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
             st.stop()
             
-        if 'Cidade' not in df_volume.columns or 'Faixa pesos' not in df_volume.columns:
+        if 'Cidade' not in df_volume.columns or 'Faixa de peso cubado (g)' not in df_volume.columns:
             st.error("🚨 **Atenção: Base de Volume Desatualizada ou Incorreta!**")
             st.markdown("Por favor, verifique se a base extraída possui as colunas de **Cidade** e **Faixa Pesos**.")
             st.stop()
@@ -447,8 +446,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_frete_leve.rename(columns={
                             'label': 'Região de preço',
                             'on time amount': 'Valor do pacote dentro do prazo',
-                            'out of time amount': 'Valor do pacote fora do prazo',
-                            'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'
+                            'out of time amount': 'Valor do pacote fora do prazo'
                         }, inplace=True)
                         df_frete_leve['Valor do pacote dentro do prazo'] = df_frete_leve['Valor do pacote dentro do prazo'].apply(formatar_moeda)
                         df_frete_leve['Valor do pacote fora do prazo'] = df_frete_leve['Valor do pacote fora do prazo'].apply(formatar_moeda)
@@ -482,8 +480,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_frete_dl.rename(columns={
                             'label': 'Região de Preço',
                             'on time amount': 'Valor dentro do prazo',
-                            'out of time amount': 'Valor fora do prazo',
-                            'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'
+                            'out of time amount': 'Valor fora do prazo'
                         }, inplace=True)
                         colunas_frete_dl = ['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']
                         if not df_frete_dl.empty:
@@ -710,7 +707,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     custo_alvo_out = 0
                                     soma_vol_mult = 0
                                     
-                                    mult_dict = dict(zip(df_price_var_clean['Faixa de peso (g/m³)'], df_price_var_clean['Multiplicador']))
+                                    mult_dict = dict(zip(df_price_var_clean['Faixa de peso cubado (g)'], df_price_var_clean['Multiplicador']))
                                     
                                     texto_explicativo.append(">> PASSO 1: Levantamento do Custo Antigo Global e Pesos (Análise de todas as 23 faixas)\n")
                                     texto_explicativo.append("Cidades Migradas (Origem):")
@@ -726,10 +723,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         custo_cidade = 0
                                         
                                         for _, v_row in vol_data.iterrows():
-                                            fx = v_row['Faixa pesos']
+                                            fx = v_row['Faixa de peso cubado (g)']
                                             qtd = v_row['# Total Packages']
                                             
-                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == fx)]
+                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_origem) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
                                             preco_on = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
                                             preco_out = tb_antiga['out of time amount'].values[0] if not tb_antiga.empty else 0
                                             
@@ -757,10 +754,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             vol_cidade = 0
                                             custo_cidade = 0
                                             for _, v_row in vol_dest_data.iterrows():
-                                                fx = v_row['Faixa pesos']
+                                                fx = v_row['Faixa de peso cubado (g)']
                                                 qtd = v_row['# Total Packages']
                                                 
-                                                tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == fx)]
+                                                tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
                                                 preco_on = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
                                                 preco_out = tb_antiga['out of time amount'].values[0] if not tb_antiga.empty else 0
                                                 
@@ -786,7 +783,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     
                                 else:
                                     frete_base = df_frete_clean[(df_frete_clean['LMC name'] == tabela_base_selecionada) & (df_frete_clean['label'] == regiao)]
-                                    faixa1_base = frete_base[frete_base['Faixa de peso (g/m³)'].str.contains('01 0 to 300', na=False, case=False)]
+                                    faixa1_base = frete_base[frete_base['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
                                     nova_faixa1_on = faixa1_base['on time amount'].values[0] if not faixa1_base.empty else 0
                                     nova_faixa1_out = faixa1_base['out of time amount'].values[0] if not faixa1_base.empty else 0
                                     
@@ -812,7 +809,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     texto_explicativo.append(f"Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
                                 
                                 for _, prow in df_regiao_tabela.iterrows():
-                                    fx = prow['Faixa de peso (g/m³))']
+                                    fx = prow['Faixa de peso cubado (g)']
                                     mult = prow['Multiplicador']
                                     val = prow['Valor dentro do prazo']
                                     texto_explicativo.append(f"{fx}: Mult {mult:.2f} x {formatar_moeda(base_on)} = {formatar_moeda(val)}")
@@ -827,13 +824,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     
                                     vols_cidade = df_volume[(df_volume['Leve'] == leve_orig) & (df_volume['Cidade_Normalizada'] == normalize_string(cid_movida))]
                                     for _, v_row in vols_cidade.iterrows():
-                                        faixa_peso = v_row['Faixa pesos']
+                                        faixa_peso = v_row['Faixa de peso cubado (g)']
                                         qtd_pacotes = v_row['# Total Packages']
                                         
-                                        tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_orig) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == faixa_peso)]
+                                        tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_orig) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == faixa_peso)]
                                         preco_antigo = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
                                         
-                                        tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso (g/m³)'] == faixa_peso]
+                                        tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso cubado (g)'] == faixa_peso]
                                         preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
                                         
                                         global_vol_migrado += qtd_pacotes
@@ -867,13 +864,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         vols_cidade = df_volume[(df_volume['Leve'] == nome_destino_final) & (df_volume['Cidade_Normalizada'] == normalize_string(cid_ext))]
                                         
                                         for _, v_row in vols_cidade.iterrows():
-                                            faixa_peso = v_row['Faixa pesos']
+                                            faixa_peso = v_row['Faixa de peso cubado (g)']
                                             qtd_pacotes = v_row['# Total Packages']
                                             
-                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == faixa_peso)]
+                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == faixa_peso)]
                                             preco_antigo = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
                                             
-                                            tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso (g/m³)'] == faixa_peso]
+                                            tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso cubado (g)'] == faixa_peso]
                                             preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
                                             
                                             global_vol_destino_original += qtd_pacotes
@@ -931,13 +928,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         vols_cidade = df_volume[(df_volume['Leve'] == nome_destino_final) & (df_volume['Cidade_Normalizada'] == normalize_string(cid_ext))]
                                         
                                         for _, v_row in vols_cidade.iterrows():
-                                            faixa_peso = v_row['Faixa pesos']
+                                            faixa_peso = v_row['Faixa de peso cubado (g)']
                                             qtd_pacotes = v_row['# Total Packages']
                                             
-                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso (g/m³)'] == faixa_peso)]
+                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == faixa_peso)]
                                             preco_antigo = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
                                             
-                                            tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso (g/m³)'] == faixa_peso]
+                                            tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso cubado (g)'] == faixa_peso]
                                             preco_novo = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
                                             
                                             global_vol_destino_original += qtd_pacotes
@@ -972,7 +969,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         'ajuste': ajuste_perc
                                     }
                             
-                            df_regiao_tabela = df_regiao_tabela[['Região de Preço', 'Faixa de peso (g/m³)', 'Valor dentro do prazo', 'Valor fora do prazo']]
+                            df_regiao_tabela = df_regiao_tabela[['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']]
                             lista_novas_tabelas.append(df_regiao_tabela)
                         
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
