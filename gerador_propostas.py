@@ -161,7 +161,8 @@ def formatar_excel(writer):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
     font_cabecalho = Font(name='Inter', size=10, bold=True)
-    alinhamento = Alignment(wrap_text=True, vertical='center')
+    # Alinhamento 100% centralizado e sem quebra de texto (exceder)
+    alinhamento = Alignment(horizontal='center', vertical='center', wrap_text=False)
     
     # Borda fina cinza-claro (D3D3D3)
     borda_cinza = Border(
@@ -177,6 +178,9 @@ def formatar_excel(writer):
         
         # Aplica a formatação de fonte, alinhamento e borda em cada célula
         for row in ws.iter_rows():
+            # Define altura padrão fixa para todas as linhas para ficarem uniformes
+            ws.row_dimensions[row[0].row].height = 18
+            
             for cell in row:
                 if cell.value is not None:
                     # Negrito na primeira linha, ou na linha 5 do detalhamento analítico
@@ -188,7 +192,7 @@ def formatar_excel(writer):
                     cell.alignment = alinhamento
                     cell.border = borda_cinza
                     
-        # Auto-ajuste inteligente de colunas
+        # Auto-ajuste de colunas baseado no maior texto (sem limite de largura)
         for col in ws.columns:
             max_length = 0
             column = col[0].column_letter
@@ -198,10 +202,8 @@ def formatar_excel(writer):
                         max_length = len(str(cell.value))
                 except:
                     pass
-            # Dá um respiro e define limite máximo de largura para não ficar gigante
-            adjusted_width = (max_length + 2) * 1.1
-            if adjusted_width > 45: 
-                adjusted_width = 45
+            # Dá um respiro e aplica a largura para acomodar o texto inteiro
+            adjusted_width = (max_length + 2) * 1.15
             if adjusted_width < 12:
                 adjusted_width = 12
             ws.column_dimensions[column].width = adjusted_width
