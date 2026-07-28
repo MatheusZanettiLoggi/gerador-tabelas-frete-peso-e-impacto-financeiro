@@ -6,6 +6,7 @@ import os
 import io
 import unicodedata
 from datetime import datetime, timezone, timedelta
+from openpyxl.styles import Font, Alignment, Border, Side
 
 # Tenta importar a biblioteca de PDF e cria a classe com Rodapé Customizado
 try:
@@ -155,6 +156,56 @@ def extrair_estado(nome_leve):
         return match.group(1)
     return None
 
+# --- FUNÇÃO DE FORMATAÇÃO DE EXCEL (ESTILO GOOGLE SHEETS) ---
+def formatar_excel(writer):
+    workbook = writer.book
+    font_padrao = Font(name='Inter', size=10)
+    font_cabecalho = Font(name='Inter', size=10, bold=True)
+    alinhamento = Alignment(wrap_text=True, vertical='center')
+    
+    # Borda fina cinza-claro (D3D3D3)
+    borda_cinza = Border(
+        left=Side(style='thin', color='D3D3D3'),
+        right=Side(style='thin', color='D3D3D3'),
+        top=Side(style='thin', color='D3D3D3'),
+        bottom=Side(style='thin', color='D3D3D3')
+    )
+    
+    for sheet_name in workbook.sheetnames:
+        ws = workbook[sheet_name]
+        ws.sheet_view.showGridLines = False # Remove as linhas de grade da planilha
+        
+        # Aplica a formatação de fonte, alinhamento e borda em cada célula
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value is not None:
+                    # Negrito na primeira linha, ou na linha 5 do detalhamento analítico
+                    if cell.row == 1 or (sheet_name == 'Detalhamento Impacto' and cell.row == 5):
+                        cell.font = font_cabecalho
+                    else:
+                        cell.font = font_padrao
+                        
+                    cell.alignment = alinhamento
+                    cell.border = borda_cinza
+                    
+        # Auto-ajuste inteligente de colunas
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            # Dá um respiro e define limite máximo de largura para não ficar gigante
+            adjusted_width = (max_length + 2) * 1.1
+            if adjusted_width > 45: 
+                adjusted_width = 45
+            if adjusted_width < 12:
+                adjusted_width = 12
+            ws.column_dimensions[column].width = adjusted_width
+
 def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
                       fat_antigo, vol_fat_antigo, tk_fat_antigo,
                       fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
@@ -241,8 +292,10 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
     # --- TABELAS PROJETADAS ---
     add_line(f"4. ABRANGENCIA COMPLETA PROJETADA: {nome_destino}", bold=True, size=11)
     pdf.ln(2)
-    widths_abr = [70, 20, 50, 30, 90] 
-    draw_table(df_abrangencia_out, widths_abr)
+    # A exclusão do "State" também entra aqui na visualização do PDF final
+    colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
+    widths_abr = [70, 50, 30, 100] 
+    draw_table(df_abrangencia_out[colunas_abr_pdf], widths_abr)
     
     pdf.add_page()
     
@@ -419,6 +472,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         with pd.ExcelWriter(output_atual, engine='openpyxl') as writer:
                             df_abr_dl.to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
                             df_frete_dl.to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
+                            formatar_excel(writer)
                         
                         st.download_button(
                             label=f"Baixar Proposta Atual: {mapa_routing.get(leve, '')}",
@@ -1041,7 +1095,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                         st.divider()
                         
-                        # PREPARAÇÃO DE DADOS ATUAIS PARA O PDF
+                        # PREPARAÇÃO DE DADOS ATUAIS PARA O PDF E EXCEL
                         tabelas_atuais_pdf = {}
                         for leve in leves_selecionados:
                             df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
@@ -1062,9 +1116,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("### 📥 Download da Proposta Final")
                             st.markdown("Proposta a ser apresentada ao Leve / Lead")
                             output = io.BytesIO()
+                            colunas_finais_abrangencia_excel = [c for c in colunas_finais_abrangencia if c != 'State']
                             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                df_escopo_final[colunas_finais_abrangencia].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
+                                df_escopo_final[colunas_finais_abrangencia_excel].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
                                 df_exibicao_tabela.to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
+                                formatar_excel(writer)
                             
                             st.download_button(
                                 label="Baixar Proposta em Excel",
@@ -1093,6 +1149,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
                                     df_resumo.to_excel(writer, sheet_name='Detalhamento Impacto', index=False, startrow=0)
                                     df_auditoria_excel.to_excel(writer, sheet_name='Detalhamento Impacto', index=False, startrow=4)
+                                    formatar_excel(writer)
                                 
                                 st.download_button(
                                     label="Baixar Detalhes do Cálculo (.xlsx)",
