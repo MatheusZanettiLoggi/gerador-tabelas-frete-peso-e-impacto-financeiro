@@ -176,7 +176,23 @@ def formatar_excel(writer):
         ws = workbook[sheet_name]
         ws.sheet_view.showGridLines = False # Remove as linhas de grade da planilha
         
-        # Aplica a formatação de fonte, alinhamento e borda em cada célula
+        # Leitor inteligente de formatos baseados no nome da coluna (Cabeçalhos geralmente nas linhas 1 ou 5)
+        col_formats = {}
+        for r in [1, 5]:
+            try:
+                for cell in ws[r]:
+                    if cell.value and isinstance(cell.value, str):
+                        val_str = cell.value
+                        if "(R$)" in val_str or "Valor dentro" in val_str or "Valor fora" in val_str:
+                            col_formats[cell.column_letter] = 'R$ #,##0.00'
+                        elif "(%)" in val_str:
+                            col_formats[cell.column_letter] = '0.00%'
+                        elif "(Pacotes)" in val_str:
+                            col_formats[cell.column_letter] = '#,##0'
+            except:
+                pass
+        
+        # Aplica a formatação de fonte, alinhamento, borda e formato de número em cada célula
         for row in ws.iter_rows():
             # Define altura padrão fixa para todas as linhas para ficarem uniformes
             ws.row_dimensions[row[0].row].height = 18
@@ -188,7 +204,10 @@ def formatar_excel(writer):
                         cell.font = font_cabecalho
                     else:
                         cell.font = font_padrao
-                        
+                        # Aplica a formatação nativa de Moeda ou Porcentagem do Excel
+                        if cell.column_letter in col_formats:
+                            cell.number_format = col_formats[cell.column_letter]
+                            
                     cell.alignment = alinhamento
                     cell.border = borda_cinza
                     
@@ -793,7 +812,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     texto_explicativo.append(f"Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
                                 
                                 for _, prow in df_regiao_tabela.iterrows():
-                                    fx = prow['Faixa de peso (g/m³)']
+                                    fx = prow['Faixa de peso (g/m³))']
                                     mult = prow['Multiplicador']
                                     val = prow['Valor dentro do prazo']
                                     texto_explicativo.append(f"{fx}: Mult {mult:.2f} x {formatar_moeda(base_on)} = {formatar_moeda(val)}")
@@ -830,14 +849,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             'LMC Atual / Origem': leve_orig,
                                             'Região de Preço': regiao,
                                             'Cidade': str(cid_movida).title(),
-                                            'Faixa de Peso': faixa_peso,
+                                            'Faixa de peso cubado (g)': faixa_peso,
                                             'Pacotes (30 dias)': qtd_pacotes,
-                                            'Tarifa Antiga': preco_antigo,
-                                            'Tarifa Base Destino': preco_novo / (1 + (ajuste_perc / 100)) if ajuste_perc != 0.0 else preco_novo,
+                                            'Tarifa Antiga (R$)': preco_antigo,
+                                            'Tarifa Base Destino (R$)': preco_novo / (1 + (ajuste_perc / 100)) if ajuste_perc != 0.0 else preco_novo,
                                             'Ajuste Comercial (%)': ajuste_perc / 100,
-                                            'Tarifa Nova Projetada': preco_novo,
-                                            'Custo Antigo Total': qtd_pacotes * preco_antigo,
-                                            'Novo Custo Total': qtd_pacotes * preco_novo,
+                                            'Tarifa Nova Projetada (R$)': preco_novo,
+                                            'Custo Antigo Total (R$)': qtd_pacotes * preco_antigo,
+                                            'Novo Custo Total (R$)': qtd_pacotes * preco_novo,
                                             'Diferença (R$)': (qtd_pacotes * preco_novo) - (qtd_pacotes * preco_antigo)
                                         })
                                         
@@ -870,14 +889,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                                 'LMC Atual / Origem': nome_destino_final,
                                                 'Região de Preço': regiao,
                                                 'Cidade': str(cid_ext).title(),
-                                                'Faixa de Peso': faixa_peso,
+                                                'Faixa de peso cubado (g)': faixa_peso,
                                                 'Pacotes (30 dias)': qtd_pacotes,
-                                                'Tarifa Antiga': preco_antigo,
-                                                'Tarifa Base Destino': preco_novo / (1 + (ajuste_perc / 100)) if ajuste_perc != 0.0 else preco_novo,
+                                                'Tarifa Antiga (R$)': preco_antigo,
+                                                'Tarifa Base Destino (R$)': preco_novo / (1 + (ajuste_perc / 100)) if ajuste_perc != 0.0 else preco_novo,
                                                 'Ajuste Comercial (%)': ajuste_perc / 100,
-                                                'Tarifa Nova Projetada': preco_novo,
-                                                'Custo Antigo Total': qtd_pacotes * preco_antigo,
-                                                'Novo Custo Total': qtd_pacotes * preco_novo,
+                                                'Tarifa Nova Projetada (R$)': preco_novo,
+                                                'Custo Antigo Total (R$)': qtd_pacotes * preco_antigo,
+                                                'Novo Custo Total (R$)': qtd_pacotes * preco_novo,
                                                 'Diferença (R$)': (qtd_pacotes * preco_novo) - (qtd_pacotes * preco_antigo)
                                             })
                                 
@@ -934,14 +953,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                                 'LMC Atual / Origem': nome_destino_final,
                                                 'Região de Preço': regiao,
                                                 'Cidade': str(cid_ext).title(),
-                                                'Faixa de Peso': faixa_peso,
+                                                'Faixa de peso cubado (g)': faixa_peso,
                                                 'Pacotes (30 dias)': qtd_pacotes,
-                                                'Tarifa Antiga': preco_antigo,
-                                                'Tarifa Base Destino': preco_novo / (1 + (ajuste_perc / 100)) if ajuste_perc != 0.0 else preco_novo,
+                                                'Tarifa Antiga (R$)': preco_antigo,
+                                                'Tarifa Base Destino (R$)': preco_novo / (1 + (ajuste_perc / 100)) if ajuste_perc != 0.0 else preco_novo,
                                                 'Ajuste Comercial (%)': ajuste_perc / 100,
-                                                'Tarifa Nova Projetada': preco_novo,
-                                                'Custo Antigo Total': qtd_pacotes * preco_antigo,
-                                                'Novo Custo Total': qtd_pacotes * preco_novo,
+                                                'Tarifa Nova Projetada (R$)': preco_novo,
+                                                'Custo Antigo Total (R$)': qtd_pacotes * preco_antigo,
+                                                'Novo Custo Total (R$)': qtd_pacotes * preco_novo,
                                                 'Diferença (R$)': (qtd_pacotes * preco_novo) - (qtd_pacotes * preco_antigo)
                                             })
                                             
@@ -959,6 +978,12 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_tabela_final = pd.concat(lista_novas_tabelas, ignore_index=True)
                         texto_completo_memorial = "\n".join(texto_explicativo)
                         df_auditoria_excel = pd.DataFrame(registros_auditoria)
+                        
+                        # --- ORDENA O DETALHAMENTO (01 A 23) ---
+                        if not df_auditoria_excel.empty:
+                            df_auditoria_excel = df_auditoria_excel.sort_values(
+                                by=['Tipo', 'LMC Atual / Origem', 'Região de Preço', 'Cidade', 'Faixa de peso cubado (g)']
+                            )
 
                         # --- ALERTAS DE MISROUTES / PACOTES IGNORADOS ---
                         ignorado_info = []
