@@ -6,7 +6,8 @@ import os
 import io
 import unicodedata
 from datetime import datetime, timezone, timedelta
-from openpyxl.styles import Font, Alignment, Border, Side
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.formatting.rule import CellIsRule
 
 # Tenta importar a biblioteca de PDF e cria a classe com Rodapé Customizado
 try:
@@ -179,21 +180,37 @@ def formatar_excel(writer):
     
     for sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
-        ws.sheet_view.showGridLines = False # Remove as linhas de grade da planilha
+        ws.sheet_view.showGridLines = False # Remove as linhas de grade
         
-        # Leitor inteligente de formatos baseados no nome da coluna
-        col_formats = {}
-        for r in [1, 5]:
+        col_formats_r1 = {}
+        col_formats_r5 = {}
+        
+        # Lê os formatos isoladamente para a linha 1
+        try:
+            for cell in ws[1]:
+                if cell.value and isinstance(cell.value, str):
+                    val_str = cell.value
+                    if "(R$)" in val_str:
+                        col_formats_r1[cell.column_letter] = '"R$" #,##0.00'
+                    elif "(%)" in val_str:
+                        col_formats_r1[cell.column_letter] = '0.00%'
+                    elif "Pacotes" in val_str:
+                        col_formats_r1[cell.column_letter] = '#,##0'
+        except:
+            pass
+
+        # Lê os formatos isoladamente para a linha 5 (Tabela de Auditoria)
+        if ws.max_row >= 5:
             try:
-                for cell in ws[r]:
+                for cell in ws[5]:
                     if cell.value and isinstance(cell.value, str):
                         val_str = cell.value
                         if "(R$)" in val_str or "Valor dentro" in val_str or "Valor fora" in val_str:
-                            col_formats[cell.column_letter] = 'R$ #,##0.00'
+                            col_formats_r5[cell.column_letter] = '"R$" #,##0.00'
                         elif "(%)" in val_str:
-                            col_formats[cell.column_letter] = '0.00%'
-                        elif "(Pacotes)" in val_str or "Pacotes (30 dias)" in val_str:
-                            col_formats[cell.column_letter] = '#,##0'
+                            col_formats_r5[cell.column_letter] = '0.00%'
+                        elif "Pacotes" in val_str:
+                            col_formats_r5[cell.column_letter] = '#,##0'
             except:
                 pass
         
@@ -207,8 +224,11 @@ def formatar_excel(writer):
                         cell.font = font_cabecalho
                     else:
                         cell.font = font_padrao
-                        if cell.column_letter in col_formats:
-                            cell.number_format = col_formats[cell.column_letter]
+                        # Formata especificamente baseado se está na tabela 1 ou 2
+                        if cell.row == 2 and cell.column_letter in col_formats_r1:
+                            cell.number_format = col_formats_r1[cell.column_letter]
+                        elif cell.row > 5 and cell.column_letter in col_formats_r5:
+                            cell.number_format = col_formats_r5[cell.column_letter]
                             
                     cell.alignment = alinhamento
                     cell.border = borda_cinza
@@ -228,6 +248,24 @@ def formatar_excel(writer):
                 adjusted_width = 12
             ws.column_dimensions[column].width = adjusted_width
 
+        # --- FORMATAÇÃO CONDICIONAL (SEMÁFORO DE CUSTO) ---
+        if sheet_name == 'Detalhamento Impacto':
+            # Vermelho (Aumento de Custo) e Verde (Economia/Neutro)
+            fill_red = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+            font_red = Font(name='Inter', size=10, color='9C0006', bold=True)
+            
+            fill_green = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
+            font_green = Font(name='Inter', size=10, color='006100', bold=True)
+            
+            # C2 (Diferença em R$)
+            ws.conditional_formatting.add('C2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
+            ws.conditional_formatting.add('C2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
+            
+            # G2 (Impacto no Budget %)
+            ws.conditional_formatting.add('G2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
+            ws.conditional_formatting.add('G2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
+
+
 def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
                       fat_antigo, vol_fat_antigo, tk_fat_antigo,
                       fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
@@ -235,7 +273,6 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
                       loggi_novo, tk_loggi_novo, imp_loggi, perc_imp_loggi,
                       detalhes_reg, df_abrangencia_out, df_tabela_out, tabelas_atuais_pdf):
     
-    # Instancia o PDF customizado em Paisagem (Landscape)
     pdf = PDFReport(orientation='L', unit='mm', format='A4')
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=20)
@@ -249,12 +286,10 @@ def create_pdf_report(nome_destino, estrategia, cidades_movimentadas_str,
     def draw_table(df, col_widths):
         pdf.set_font("Arial", 'B', 9)
         pdf.set_text_color(0, 0, 0)
-        # Cabeçalho
         for col, w in zip(df.columns, col_widths):
             safe_col = unicodedata.normalize('NFKD', str(col)).encode('ascii', 'ignore').decode('ascii')
             pdf.cell(w, 8, safe_col, border=1, align='C')
         pdf.ln()
-        # Linhas
         pdf.set_font("Arial", '', 8)
         for _, row in df.iterrows():
             for item, w in zip(row, col_widths):
@@ -376,7 +411,15 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_price_var_clean = processar_price_var(df_price_var_raw)
             df_frete_clean = processar_frete(df_frete)
             df_slos_clean = processar_slos(df_slos)
+            
+            # Garante que mapeou os nomes antes de agrupar o volume
             df_nomes_leves = processar_nomes_leves(df_volume)
+            
+            # --- AGRUPAMENTO DE VOLUME (Evita duplicação de faixas para a mesma cidade) ---
+            df_volume = df_volume.groupby(
+                ['Leve', 'Routing Code', 'Cidade', 'Cidade_Normalizada', 'Faixa de peso cubado (g)'],
+                as_index=False
+            )['# Total Packages'].sum()
             
         st.sidebar.success("Todas as bases carregadas e padronizadas!")
     
