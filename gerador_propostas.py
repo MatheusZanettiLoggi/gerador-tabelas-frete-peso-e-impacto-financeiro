@@ -641,8 +641,18 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
 
                 with st.expander("7. Estratégia de Precificação da Proposta", expanded=True):
-                    if df_movidos.empty:
-                        st.warning("Nenhum município foi movimentado para o destino ainda.")
+                    pode_prosseguir = False
+                    estrategia_preco = None
+                    tabela_base_selecionada = None
+                    
+                    # Identifica se é apenas um Reajuste Comercial na tabela atual do Leve
+                    if df_movidos.empty and tipo_destino == "Um Novo Lead":
+                        st.warning("Nenhum município foi movimentado para o Novo Lead ainda. Selecione cidades no Passo 6 para continuar.")
+                    elif df_movidos.empty and tipo_destino == "Um Leve Existente (já selecionado)":
+                        st.info("💡 **Modo de Reajuste Comercial:** Nenhuma cidade foi movimentada para este Leve. O simulador manterá a abrangência atual e permitirá que você simule reajustes de tarifa no Passo 8.")
+                        estrategia_preco = "Reajuste da Tabela Atual (Sem movimentação)"
+                        tabela_base_selecionada = nome_destino_final
+                        pode_prosseguir = True
                     else:
                         st.markdown("Como você deseja gerar a nova Tabela Frete Peso para as cidades movidas?")
                         estrategia_preco = st.radio(
@@ -651,7 +661,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                              "Utilizar uma Tabela Existente (Manter tabela do destino atual)"]
                         )
                         
-                        tabela_base_selecionada = None
                         if estrategia_preco == "Utilizar uma Tabela Existente (Manter tabela do destino atual)":
                             if tipo_destino == "Um Leve Existente (já selecionado)":
                                 st.info(f"O sistema utilizará a tabela atual do Leve **{nome_destino_final}** para precificar as cidades absorvidas.")
@@ -659,9 +668,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             else:
                                 nome_base_display = st.selectbox("Qual tabela atual devemos usar como base para o Novo Lead?", leves_selecionados_formatados)
                                 tabela_base_selecionada = mapa_nomes.get(nome_base_display)
+                        pode_prosseguir = True
                 
                 # --- PROCESSAMENTO DOS RESULTADOS ---
-                if not df_movidos.empty:
+                if pode_prosseguir:
                     if tipo_destino == "Um Leve Existente (já selecionado)":
                         df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
                         df_abrangencia_existente['Observação'] = "Abrangência Atual"
@@ -1176,7 +1186,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 'label': 'Regiao de Preco',
                                 'on time amount': 'Valor dentro do prazo',
                                 'out of time amount': 'Valor fora do prazo',
-                                'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'
+                                'Faixa de peso cubado (g)': 'Faixa de peso cubado (g)'
                             }, inplace=True)
                             df_frete_dl['Valor dentro do prazo'] = df_frete_dl['Valor dentro do prazo'].apply(formatar_moeda)
                             df_frete_dl['Valor fora do prazo'] = df_frete_dl['Valor fora do prazo'].apply(formatar_moeda)
@@ -1237,8 +1247,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("Resumo executivo do simulador para apresentação.")
                             
                             if HAS_FPDF:
-                                cidades_movimentadas_lista = sorted(df_movidos['Cidade'].str.title().unique().tolist())
-                                cidades_movimentadas_str = ", ".join(cidades_movimentadas_lista)
+                                if not df_movidos.empty:
+                                    cidades_movimentadas_lista = sorted(df_movidos['Cidade'].str.title().unique().tolist())
+                                    cidades_movimentadas_str = ", ".join(cidades_movimentadas_lista)
+                                else:
+                                    cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
 
                                 pdf_data = create_pdf_report(
                                     nome_destino_final, estrategia_preco, cidades_movimentadas_str,
