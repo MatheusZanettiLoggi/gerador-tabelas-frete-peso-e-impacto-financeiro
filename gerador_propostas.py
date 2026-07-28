@@ -282,7 +282,8 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     if os.path.exists(logo_path):
         with open(logo_path, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode()
-            logo_html = f'<img src="data:image/png;base64,{encoded_string}" style="position: fixed; top: -5mm; right: 0; width: 45px; height: auto; z-index: 1000;">'
+            # top: -20mm garante que a imagem fique 100% isolada dentro da margem superior do papel, longe das tabelas
+            logo_html = f'<img src="data:image/png;base64,{encoded_string}" style="position: fixed; top: -20mm; right: 0; width: 45px; height: auto; z-index: 1000;">'
 
     html_content = f"""
     <!DOCTYPE html>
@@ -293,7 +294,8 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
         <style>
             @page {{
                 size: A4;
-                margin: 20mm 15mm;
+                /* Aumentamos a margem superior para 30mm para que o logo (fixed) tenha seu espaço sem tocar nas tabelas */
+                margin: 30mm 15mm 20mm 15mm;
                 background-color: #ffffff;
                 @bottom-center {{
                     content: "Simulador de Movimentação de Leves - Desenvolvido por Matheus Zanetti | Página " counter(page);
