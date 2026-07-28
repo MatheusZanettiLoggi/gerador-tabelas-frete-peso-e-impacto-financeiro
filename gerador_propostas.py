@@ -273,13 +273,16 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     def format_perc(val):
         return f"{abs(val):.2f}%"
 
-    # --- Inserção Segura do Logo ---
+    # --- Inserção Segura do Logo (position: fixed repete em todas as páginas no Weasyprint) ---
     logo_html = ""
     logo_path = "logo.png"
+    if not os.path.exists(logo_path) and os.path.exists("logo.png.png"):
+        logo_path = "logo.png.png"
+        
     if os.path.exists(logo_path):
         with open(logo_path, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode()
-            logo_html = f'<img src="data:image/png;base64,{encoded_string}" style="position: absolute; top: -5mm; right: 0; width: 45px; height: auto;">'
+            logo_html = f'<img src="data:image/png;base64,{encoded_string}" style="position: fixed; top: -5mm; right: 0; width: 45px; height: auto; z-index: 1000;">'
 
     html_content = f"""
     <!DOCTYPE html>
