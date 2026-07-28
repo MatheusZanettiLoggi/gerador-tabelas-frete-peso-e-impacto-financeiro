@@ -4,6 +4,7 @@ import numpy as np
 import re
 import os
 import io
+import base64
 import unicodedata
 from datetime import datetime, timezone, timedelta
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
@@ -268,6 +269,14 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     def format_perc(val):
         return f"{abs(val):.2f}%"
 
+    # --- Inserção Segura do Logo ---
+    logo_html = ""
+    logo_path = "logo.png"
+    if os.path.exists(logo_path):
+        with open(logo_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode()
+            logo_html = f'<img src="data:image/png;base64,{encoded_string}" style="position: absolute; top: -5mm; right: 0; width: 45px; height: auto;">'
+
     html_content = f"""
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -279,14 +288,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 size: A4;
                 margin: 20mm 15mm;
                 background-color: #ffffff;
-                @top-right {{
-                    content: "";
-                    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="24" height="24"><path fill="%2300baff" d="M256 0C114.6 0 0 114.6 0 256s114.6 256 256 256 256-114.6 256-256S397.4 0 256 0zM384.3 322.2c-5.7 13.1-15.5 24-28.1 30.6-12.7 6.7-27.2 8.4-41.1 5-30.8-7.7-56.1-27.9-71.9-55.2-15.8-27.3-21.2-59.5-15.2-90.8 1.4-7.2 4.2-14 8.2-20.1-28.6 15.6-48.4 46.1-50.6 81.3-.4 6.9-1.2 13.8-2.3 20.6-2.5 15.5-10.4 29.5-22.3 39.7-11.9 10.2-27.1 15.6-42.6 15.1-15.5-.5-30.3-6.6-41.5-17.4-11.2-10.8-18.1-25.6-19.1-41.4-.9-15.8 3.5-31.5 12.5-44.8 9-13.3 22.1-23.4 37.3-28.4 15.2-5 31.7-4.6 46.6.9 7.4 2.7 14.3 6.6 20.6 11.5 3.1-25.3 16.8-48.2 38.3-63.5 21.5-15.3 48.3-22 75-18.7 26.7 3.3 50.7 16.5 67.3 37.1 16.6 20.6 24.6 47 22.3 73.2-.4 4.5-1.1 9-2.1 13.4 11.3-4.5 23.3-6.3 35.3-5.3 12 1 23.6 5.8 32.9 13.7 9.3 7.9 16 18.5 19.1 30.3 3.1 11.8 2.5 24.4-1.7 35.8z"/></svg>');
-                    background-repeat: no-repeat;
-                    background-position: right center;
-                    width: 30px;
-                    height: 30px;
-                }}
                 @bottom-center {{
                     content: "Simulador de Movimentação de Leves - Desenvolvido por Matheus Zanetti | Página " counter(page);
                     font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -452,10 +453,8 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
         </style>
     </head>
     <body>
+    {logo_html}
     """
-
-    fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
-    data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
     
     html_content += f"""
         <h1>Relatório do Simulador de Movimentação de Leves</h1>
@@ -542,11 +541,12 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
             perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
             
             ajuste = dados.get('ajuste', 0.0)
-            ajuste_html = f'<div class="region-alert">⚠️ Ajuste Comercial Aplicado: {ajuste:+.2f}%</div>' if ajuste != 0.0 else ''
+            # Removemos os emojis que quebravam o PDF e deixamos um aviso limpo
+            ajuste_html = f'<div class="region-alert">Aviso: Ajuste Comercial Aplicado de {ajuste:+.2f}%</div>' if ajuste != 0.0 else ''
             
             html_content += f"""
             <div class="region-block">
-                <div class="region-title">📍 Região: {reg}</div>
+                <div class="region-title">Região: {reg}</div>
                 {ajuste_html}
                 <div class="metric-row">
                     <span class="metric-label">Custo Antigo:</span>
