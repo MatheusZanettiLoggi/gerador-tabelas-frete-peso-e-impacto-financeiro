@@ -48,6 +48,9 @@ st.sidebar.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvid
 if "num_cenarios" not in st.session_state:
     st.session_state["num_cenarios"] = 1
 
+# Cores pastéis para organizar os cenários visualmente (C1, C2, C3, C4...)
+CORES_CENARIOS = ['#e6f2ff', '#e6ffe6', '#fff2e6', '#f2e6ff', '#ffe6e6']
+
 # --- FUNÇÕES DE TRATAMENTO E PADRONIZAÇÃO DE DADOS ---
 @st.cache_data
 def load_data(file):
@@ -146,12 +149,6 @@ def formatar_moeda(valor):
     except:
         return str(valor)
 
-def extrair_estado(nome_leve):
-    match = re.search(r'-\s*([A-Z]{2})\b', nome_leve)
-    if match:
-        return match.group(1)
-    return None
-
 # --- FUNÇÃO DE FORMATAÇÃO DE EXCEL ---
 def formatar_excel(writer):
     workbook = writer.book
@@ -211,7 +208,7 @@ def formatar_excel(writer):
 
 
 # --- GERADOR DE PDF ---
-def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf):
+def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
     fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
     data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
 
@@ -282,7 +279,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
             th {{ background-color: #002766; color: #fff; font-weight: bold; padding: 6px 4px; border: 1px solid #002766; }}
             td {{ padding: 5px 4px; border: 1px solid #e0e0e0; color: #333; }}
             tr:nth-child(even) {{ background-color: #f4f8fb; }}
-            .highlight-row td {{ background-color: #002766 !important; color: #ffffff !important; font-weight: bold !important; }}
             .page-break {{ page-break-before: always; }}
             .cenario-header {{ background-color: #eef4fc; border-left: 4px solid #006aff; padding: 10px; margin-top: 15px; margin-bottom: 10px; font-weight: bold; color: #002766; }}
         </style>
@@ -313,20 +309,31 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
         elif "Vol" in c:
             df_resumo_html[c] = df_resumo_html[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
 
-    def generate_html_table(df):
+    def generate_html_table_styled(df):
         if df is None or df.empty: return "<p>Sem dados.</p>"
         html = "<table><thead><tr>"
         for col in df.columns: html += f"<th>{col}</th>"
         html += "</tr></thead><tbody>"
         for _, row in df.iterrows():
-            cls = ' class="highlight-row"' if str(row.iloc[0]).lower() == 'total geral' else ''
-            html += f"<tr{cls}>"
-            for val in row: html += f"<td>{val}</td>"
-            html += "</tr>"
+            if str(row.iloc[0]).lower() == 'total geral':
+                html += f"<tr style='background-color: #002766; color: #ffffff; font-weight: bold;'>"
+                for val in row:
+                    html += f"<td>{val}</td>"
+                html += "</tr>"
+            else:
+                html += "<tr>"
+                for col_idx, val in enumerate(row):
+                    col_name = df.columns[col_idx]
+                    bg_color = ""
+                    for i, cen in enumerate(cenarios_nomes):
+                        if cen in col_name or f"Cenário {i+1}" in col_name:
+                            bg_color = f" background-color: {CORES_CENARIOS[i % len(CORES_CENARIOS)]};"
+                    html += f"<td style='{bg_color}'>{val}</td>"
+                html += "</tr>"
         html += "</tbody></table>"
         return html
 
-    html_content += generate_html_table(df_resumo_html)
+    html_content += generate_html_table_styled(df_resumo_html)
 
     # --- 2. DETALHAMENTO POR CENÁRIO ---
     html_content += f"""<div class="page-break"></div><h2>2. DETALHAMENTO POR CENÁRIO</h2>"""
@@ -366,7 +373,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
                 imp_r = dados['custo_novo'] - dados['custo_antigo']
                 perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
                 ajuste = dados.get('ajuste', 0.0)
-                ajuste_html = f'<div class="region-alert">Aviso: Ajuste Comercial Aplicado de {ajuste:+.2f}%</div>' if ajuste != 0.0 else ''
+                ajuste_html = f'<div class="region-alert">Aviso: Ajuste Comercial Aplicado. Verificar Tabela Projetada.</div>' if ajuste != 0.0 else ''
                 
                 html_content += f"""
                 <div class="region-block">
@@ -378,10 +385,22 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
                 </div>
                 """
 
+    def generate_simple_html_table(df):
+        if df is None or df.empty: return "<p>Sem dados.</p>"
+        html = "<table><thead><tr>"
+        for col in df.columns: html += f"<th>{col}</th>"
+        html += "</tr></thead><tbody>"
+        for _, row in df.iterrows():
+            html += "<tr>"
+            for val in row: html += f"<td>{val}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+        return html
+
     # --- 3. ABRANGENCIA ---
     html_content += f"""<div class="page-break"></div><h2>3. ABRANGÊNCIA COMPLETA PROJETADA: {nome_destino}</h2>"""
     colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
-    html_content += generate_html_table(df_abrangencia_out[colunas_abr_pdf])
+    html_content += generate_simple_html_table(df_abrangencia_out[colunas_abr_pdf])
 
     # --- 4. TABELAS PROJETADAS ---
     html_content += f"""<div class="page-break"></div><h2>4. TABELAS FRETE PESO PROJETADAS</h2>"""
@@ -390,14 +409,14 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
         df_ex = df_tabela.copy()
         df_ex['Valor dentro do prazo'] = df_ex['Valor dentro do prazo'].apply(format_money)
         df_ex['Valor fora do prazo'] = df_ex['Valor fora do prazo'].apply(format_money)
-        html_content += generate_html_table(df_ex)
+        html_content += generate_simple_html_table(df_ex)
 
     # --- 5. TABELAS ATUAIS ---
     if tabelas_atuais_pdf:
         html_content += f"""<div class="page-break"></div><h2>5. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
         for leve_nome, df_tab in tabelas_atuais_pdf.items():
             html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
-            html_content += generate_html_table(df_tab)
+            html_content += generate_simple_html_table(df_tab)
 
     html_content += """</body></html>"""
     
@@ -592,6 +611,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 # --- PROCESSAMENTO ---
                 if pode_prosseguir:
+                    
+                    # Definição e Inicialização obrigatórias para evitar o NameError
+                    dict_tabelas_finais = {}
+                    tabelas_atuais_pdf = {}
+                    
                     if tipo_destino == "Um Leve Existente (já selecionado)":
                         df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
                         df_abrangencia_existente['Observação'] = "Abrangência Atual"
@@ -651,8 +675,27 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         else:
                             st.info("Nenhuma volumetria recente encontrada para as cidades selecionadas.")
                             
-                        st.markdown("### 🎛️ Configuração de Cenários")
+                        # Cabeçalho e Botão de Novo Cenário alinhado lado a lado
+                        c_head, c_btn = st.columns([5, 1.5])
+                        with c_head:
+                            st.markdown("### 🎛️ Configuração de Cenários")
+                        with c_btn:
+                            st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+                            if st.button("➕ Novo Cenário", use_container_width=True):
+                                st.session_state["num_cenarios"] += 1
+                                st.rerun()
+
                         cenarios_nomes = [f"Cenário {i+1}" for i in range(st.session_state["num_cenarios"])]
+                        
+                        # Injeção de CSS para colorir as Abas do Streamlit de acordo com a paleta
+                        css_tabs = "<style>"
+                        for i in range(st.session_state["num_cenarios"]):
+                            # (i+2) porque a primeira tab é o "Resumo Geral" gerado depois no Passo 9
+                            bg_cor = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                            css_tabs += f'button[data-baseweb="tab"]:nth-child({i+1}) {{ background-color: {bg_cor}; border-radius: 6px 6px 0 0; margin-right: 2px; border: 1px solid #ccc; border-bottom: none; }}\n'
+                        css_tabs += "</style>"
+                        st.markdown(css_tabs, unsafe_allow_html=True)
+
                         tabs_cenarios = st.tabs(cenarios_nomes)
                         
                         for c_idx, tab in enumerate(tabs_cenarios):
@@ -691,20 +734,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             st.button("Zerar", key=f"btn_zerar_{cen_id}_{regiao}", on_click=zerar_reg, use_container_width=True)
                                         st.markdown("<br>", unsafe_allow_html=True)
 
-                        st.markdown("<br>", unsafe_allow_html=True)
-                        if st.button("➕ Adicionar Novo Cenário"):
-                            st.session_state["num_cenarios"] += 1
-                            st.rerun()
-
                     with st.expander("9. Resumo Comparativo de Cenários", expanded=True):
                         st.success(f"Cálculos finalizados para **{nome_destino_final}**!")
                         
                         resultados_cenarios = []
-                        dict_tabelas_finais = {}
                         cenario_metrics = {}
                         
-                        for cenario_nome in cenarios_nomes:
-                            cen_id = f"c{cenarios_nomes.index(cenario_nome)+1}"
+                        for c_idx, cenario_nome in enumerate(cenarios_nomes):
+                            cen_id = f"c{c_idx+1}"
                             lista_tabelas_regiao = []
                             
                             fat_atual_total = 0
@@ -720,6 +757,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 
                                 mult_dict = dict(zip(df_price_var_clean['Faixa de peso cubado (g)'], df_price_var_clean['Multiplicador']))
                                 
+                                # 1. Levantar Baseline da Região
                                 def calc_base_vol(cidades_df, lmc_col):
                                     v = 0; c_on = 0; s_mult = 0; c_atual = 0
                                     for _, row in cidades_df.iterrows():
@@ -763,10 +801,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         v2, co2, sm2, ca2 = calc_base_vol(cidades_exist, 'LMC Dummy')
                                         vol_regiao += v2; custo_atual_regiao += ca2; soma_vol_mult += sm2
 
+                                # 2. Construir Tabela Região e Aplicar Ajuste
                                 df_regiao_tabela = df_price_var_clean.copy()
                                 df_regiao_tabela['Região de Preço'] = regiao
                                 df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
-                                df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_on # Simplificado fora do prazo
+                                df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
                                 
                                 ajuste_tipo = st.session_state.get(f"tipo_{cen_id}_{regiao}", "%")
                                 ajuste_val = st.session_state.get(f"val_{cen_id}_{regiao}", 0.0)
@@ -788,6 +827,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     
                                 lista_tabelas_regiao.append(df_regiao_tabela[['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']])
                                 
+                                # 3. Calcular Custo Simulado Desta Regiao
                                 custo_simulado_regiao = 0
                                 for _, prow in df_regiao_tabela.iterrows():
                                     fx = prow['Faixa de peso cubado (g)']
@@ -824,10 +864,12 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     "% Aumento": (custo_simulado_regiao / custo_atual_regiao - 1) if custo_atual_regiao > 0 else 0
                                 })
                             
+                            # Consolida Tabela do Cenário
                             df_tabela_final = pd.concat(lista_tabelas_regiao, ignore_index=True)
                             df_tabela_final.rename(columns={'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'}, inplace=True)
                             dict_tabelas_finais[cenario_nome] = df_tabela_final
                             
+                            # Adiciona a linha Total do Cenário
                             resultados_cenarios.append({
                                 "Cenário": cenario_nome,
                                 "Região de Preço": "Total Geral",
@@ -889,6 +931,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 'detalhes_regioes': detalhes_regioes_indiv
                             }
 
+                        # Transforma resultados em DataFrame Comparativo
                         df_res_bruto = pd.DataFrame(resultados_cenarios)
                         df_base_atual = df_res_bruto[df_res_bruto['Cenário'] == cenarios_nomes[0]][['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual']]
                         df_comparativo = df_base_atual.copy()
@@ -898,11 +941,21 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             df_c.columns = ['Região de Preço', f'Fat. {cen}', f'TK {cen}', f'Impacto {cen}', f'% Aum. {cen}']
                             df_comparativo = df_comparativo.merge(df_c, on='Região de Preço')
                         
+                        # Move a linha "Total Geral" para o final
                         row_total = df_comparativo[df_comparativo['Região de Preço'] == 'Total Geral']
                         df_comparativo = df_comparativo[df_comparativo['Região de Preço'] != 'Total Geral']
                         df_comparativo = pd.concat([df_comparativo, row_total], ignore_index=True)
                         
                         # --- EXIBIÇÃO EM ABAS (SEÇÃO 9) ---
+                        
+                        # Injeção de CSS para colorir as Abas do Streamlit da Seção 9
+                        css_tabs_resumo = "<style>"
+                        for i in range(st.session_state["num_cenarios"]):
+                            bg_cor = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                            css_tabs_resumo += f'button[data-baseweb="tab"]:nth-child({i+2}) {{ background-color: {bg_cor}; border-radius: 6px 6px 0 0; margin-right: 2px; border: 1px solid #ccc; border-bottom: none; }}\n'
+                        css_tabs_resumo += "</style>"
+                        st.markdown(css_tabs_resumo, unsafe_allow_html=True)
+
                         tabs_res = st.tabs(["📊 Resumo Geral"] + cenarios_nomes)
                         
                         with tabs_res[0]:
@@ -945,12 +998,22 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 elif "Vol" in c:
                                     df_disp[c] = df_disp[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
                             
-                            def highlight_total_row(row):
-                                if row['Região de Preço'] == 'Total Geral':
-                                    return ['background-color: #002766; color: white; font-weight: bold; text-align: center;'] * len(row)
-                                return ['text-align: center;'] * len(row)
-                            
-                            styled_df = df_disp.style.apply(highlight_total_row, axis=1)
+                            # Função para colorir e estruturar a Tabela Pandas no Streamlit
+                            def get_styles(df):
+                                styles = pd.DataFrame('', index=df.index, columns=df.columns)
+                                for col in df.columns:
+                                    for i, cen in enumerate(cenarios_nomes):
+                                        if cen in col or f"Cenário {i+1}" in col:
+                                            styles[col] = f'background-color: {CORES_CENARIOS[i % len(CORES_CENARIOS)]}; color: #333333; text-align: center;'
+                                        else:
+                                            styles[col] = 'text-align: center;'
+                                
+                                for idx in df.index:
+                                    if df.loc[idx, 'Região de Preço'] == 'Total Geral':
+                                        styles.loc[idx, :] = 'background-color: #002766; color: white; font-weight: bold; text-align: center;'
+                                return styles
+                                
+                            styled_df = df_disp.style.apply(get_styles, axis=None)
                             st.dataframe(styled_df, hide_index=True, use_container_width=True)
 
                         for idx, cen in enumerate(cenarios_nomes):
@@ -1017,16 +1080,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             st.markdown(f"**Variação:** <span style='color: {color}; font-weight: bold;'>{formatar_moeda(imp_r)} ({perc_r:+.2f}%)</span>", unsafe_allow_html=True)
 
                         st.divider()
-                        st.subheader("Tabelas de Frete Peso e Abrangência")
-                        st.dataframe(df_escopo_final[colunas_finais_abrangencia], hide_index=True, use_container_width=True)
-                        for cen, df_tab in dict_tabelas_finais.items():
-                            st.markdown(f"**Tabela Projetada - {cen}**")
-                            df_exibicao_tabela = df_tab.copy()
-                            df_exibicao_tabela['Valor dentro do prazo'] = df_exibicao_tabela['Valor dentro do prazo'].apply(formatar_moeda)
-                            df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
-                            st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
-
-                        st.divider()
+                        
+                        # PREPARAÇÃO DE DADOS ATUAIS PARA O PDF E EXCEL
+                        for leve in leves_selecionados:
+                            df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
+                            df_frete_dl.rename(columns={'label': 'Regiao de Preco', 'on time amount': 'Valor dentro do prazo', 'out of time amount': 'Valor fora do prazo'}, inplace=True)
+                            df_frete_dl['Valor dentro do prazo'] = df_frete_dl['Valor dentro do prazo'].apply(formatar_moeda)
+                            df_frete_dl['Valor fora do prazo'] = df_frete_dl['Valor fora do prazo'].apply(formatar_moeda)
+                            if not df_frete_dl.empty: tabelas_atuais_pdf[leve] = df_frete_dl[['Regiao de Preco', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']]
                         
                         col_dw1, col_down3 = st.columns([1, 1])
                         with col_dw1:
@@ -1063,7 +1124,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     nome_destino_final, estrategia_preco, cidades_movimentadas_str, 
                                     df_comparativo, cenario_metrics, 
                                     df_escopo_final[colunas_finais_abrangencia], 
-                                    dict_tabelas_finais, tabelas_atuais_pdf
+                                    dict_tabelas_finais, tabelas_atuais_pdf, cenarios_nomes
                                 )
                                 st.download_button(
                                     label="Baixar Relatório (PDF)",
