@@ -8,7 +8,6 @@ import base64
 import unicodedata
 from datetime import datetime, timezone, timedelta
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
-from openpyxl.formatting.rule import CellIsRule
 
 # Tenta importar as bibliotecas de PDF
 try:
@@ -44,6 +43,10 @@ with st.sidebar.expander("1. Upload de Bases de Dados", expanded=True):
     file_volume = st.file_uploader("Upload Volume", type=["xlsx", "csv"], label_visibility="collapsed")
 
 st.sidebar.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvido por <b>Matheus Zanetti</b></small></div>", unsafe_allow_html=True)
+
+# --- INICIALIZAÇÃO DE ESTADOS ---
+if "num_cenarios" not in st.session_state:
+    st.session_state["num_cenarios"] = 1
 
 # --- FUNÇÕES DE TRATAMENTO E PADRONIZAÇÃO DE DADOS ---
 @st.cache_data
@@ -141,14 +144,9 @@ def formatar_moeda(valor):
     try:
         return f"R$ {float(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     except:
-        return valor
+        return str(valor)
 
-def extrair_estado(nome_leve):
-    match = re.search(r'-\s*([A-Z]{2})\b', nome_leve)
-    if match:
-        return match.group(1)
-    return None
-
+# --- FUNÇÃO DE FORMATAÇÃO DE EXCEL ---
 def formatar_excel(writer):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
@@ -171,9 +169,9 @@ def formatar_excel(writer):
             for cell in row:
                 if cell.value and isinstance(cell.value, str):
                     val_str = cell.value.lower()
-                    if "(R$)" in cell.value or "tarifa" in val_str or "ticket" in val_str or "faturamento" in val_str or "impacto" in val_str:
+                    if "(r$)" in val_str or "tarifa" in val_str or "ticket" in val_str or "faturamento" in val_str or "impacto" in val_str or "fat." in val_str or "tk" in val_str:
                         col_formats[cell.column_letter] = '"R$" #,##0.00'
-                    elif "(%)" in cell.value or "% var" in val_str or "ajuste" in val_str or "% aumento" in val_str:
+                    elif "(%)" in val_str or "% var" in val_str or "ajuste" in val_str or "% aum" in val_str:
                         col_formats[cell.column_letter] = '0.00%'
                     elif "pacotes" in val_str or "volume" in val_str:
                         col_formats[cell.column_letter] = '#,##0'
@@ -182,7 +180,7 @@ def formatar_excel(writer):
             ws.row_dimensions[row[0].row].height = 18
             for cell in row:
                 if cell.value is not None:
-                    if cell.row == 1 or (sheet_name == 'Detalhamento Impacto' and cell.row == 5) or str(cell.value) in col_formats.keys():
+                    if cell.row == 1 or str(cell.value) in col_formats.keys() or "Total Geral" in str(row[0].value):
                         cell.font = font_cabecalho
                     else:
                         cell.font = font_padrao
@@ -200,40 +198,33 @@ def formatar_excel(writer):
                 try:
                     if len(str(cell.value)) > max_length:
                         max_length = len(str(cell.value))
-                except:
-                    pass
+                except: pass
             adjusted_width = (max_length + 2) * 1.15
-            if adjusted_width < 12:
-                adjusted_width = 12
+            if adjusted_width < 12: adjusted_width = 12
             ws.column_dimensions[column].width = adjusted_width
 
-        if sheet_name == 'Detalhamento Impacto':
-            fill_red = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
-            font_red = Font(name='Inter', size=10, color='9C0006', bold=True)
-            fill_green = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
-            font_green = Font(name='Inter', size=10, color='006100', bold=True)
-            
-            ws.conditional_formatting.add('C2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
-            ws.conditional_formatting.add('C2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
-            ws.conditional_formatting.add('G2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
-            ws.conditional_formatting.add('G2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
 
-def generate_html_pdf(nome_destino, df_resumo_comparativo,
-                      detalhes_cenarios, df_abrangencia_out, dict_tabelas_out):
+# --- GERADOR DE PDF ---
+def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf):
     fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
     data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
 
     def format_money(val):
         return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
     def format_perc(val):
         return f"{val:+.2f}%"
+    def get_indicator(val, is_cost=False):
+        if val > 0: return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">▲ +{format_money(val)}</span>'
+        elif val < 0: return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">▼ -{format_money(abs(val))}</span>'
+        return f'<span class="arrow-neutral">■ {format_money(val)}</span>'
+    def get_perc_indicator(val, is_cost=False):
+        if val > 0: return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">(+{format_perc(val)})</span>'
+        elif val < 0: return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">({format_perc(val)})</span>'
+        return f'<span class="arrow-neutral">(0.00%)</span>'
 
     logo_html = ""
     logo_path = "logo.png"
-    if not os.path.exists(logo_path) and os.path.exists("logo.png.png"):
-        logo_path = "logo.png.png"
-        
+    if not os.path.exists(logo_path) and os.path.exists("logo.png.png"): logo_path = "logo.png.png"
     if os.path.exists(logo_path):
         with open(logo_path, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode()
@@ -251,92 +242,158 @@ def generate_html_pdf(nome_destino, df_resumo_comparativo,
                 margin: 30mm 15mm 20mm 15mm;
                 background-color: #ffffff;
                 @bottom-center {{
-                    content: "Simulador de Movimentação de Leves | Página " counter(page);
+                    content: "Simulador de Movimentação de Leves - Desenvolvido por Matheus Zanetti | Página " counter(page);
                     font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif;
                     font-size: 8pt;
                     color: #888888;
+                    font-style: italic;
                 }}
             }}
-            body {{
-                font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-                margin: 0;
-                padding: 0;
-                color: #000000;
-                background-color: #ffffff;
-                font-size: 9pt;
-                line-height: 1.5;
-            }}
-            h1 {{ color: #002766; font-size: 16pt; text-align: center; margin-top: 10px; margin-bottom: 5px; }}
-            h2 {{ color: #006aff; font-size: 12pt; border-bottom: 2px solid #00baff; padding-bottom: 4px; margin-top: 25px; margin-bottom: 15px; }}
-            .header-meta {{ text-align: center; color: #666; font-size: 8pt; margin-bottom: 25px; }}
-            table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 8pt; }}
-            th {{ background-color: #002766; color: #ffffff; font-weight: bold; text-align: center; padding: 6px 4px; border: 1px solid #002766; }}
-            td {{ padding: 5px 4px; border: 1px solid #e0e0e0; text-align: center; color: #333333; }}
-            tr:nth-child(even) {{ background-color: #f4f8fb; }}
-            .page-break {{ page-break-before: always; }}
-            .highlight-row {{ background-color: #e6f0ff !important; font-weight: bold; }}
-            .arrow-up-red {{ color: #ff4b4b; font-weight: bold; }}
+            body {{ font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 0; color: #000; background-color: #ffffff; font-size: 9.5pt; line-height: 1.4; }}
+            *, *::before, *::after {{ box-sizing: border-box; }}
+            h1 {{ color: #002766; font-size: 16pt; text-align: center; margin-top: 10px; margin-bottom: 5px; text-transform: uppercase; font-weight: 700; }}
+            h2 {{ color: #006aff; font-size: 12pt; border-bottom: 2px solid #00baff; padding-bottom: 4px; margin-top: 25px; margin-bottom: 10px; font-weight: 600; }}
+            h3 {{ color: #002766; font-size: 11pt; margin-top: 15px; margin-bottom: 8px; font-weight: 600; }}
+            .header-meta {{ text-align: center; color: #666; font-size: 8.5pt; margin-bottom: 25px; }}
+            .context-box {{ background-color: #fff; border: 1px solid #e0e0e0; border-left: 4px solid #00baff; padding: 10px 15px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }}
+            .context-item {{ margin-bottom: 4px; }}
+            .label {{ font-weight: bold; color: #002766; }}
+            .card-container {{ display: block; width: 100%; margin-bottom: 15px; page-break-inside: avoid; }}
+            .card {{ background-color: #fff; border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }}
+            .metric-row {{ display: block; width: 100%; margin-bottom: 6px; }}
+            .metric-label {{ display: inline-block; width: 180px; color: #555; }}
+            .metric-value {{ display: inline-block; font-weight: bold; color: #000; }}
+            .metric-sub {{ color: #777; font-size: 8pt; margin-left: 10px; font-weight: normal; }}
+            .arrow-up-green {{ color: #09ab3b; font-weight: bold; }}
             .arrow-down-green {{ color: #09ab3b; font-weight: bold; }}
+            .arrow-up-red {{ color: #ff4b4b; font-weight: bold; }}
+            .arrow-down-red {{ color: #ff4b4b; font-weight: bold; }}
             .arrow-neutral {{ color: #888888; font-weight: bold; }}
+            .region-block {{ background-color: #fff; border: 1px solid #e0e0e0; border-radius: 4px; padding: 10px; margin-bottom: 8px; page-break-inside: avoid; }}
+            .region-title {{ font-weight: bold; color: #006aff; margin-bottom: 6px; font-size: 10pt; }}
+            .region-alert {{ color: #e67e22; font-weight: bold; font-size: 8.5pt; margin-bottom: 6px; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 8pt; text-align: center; }}
+            th {{ background-color: #002766; color: #fff; font-weight: bold; padding: 6px 4px; border: 1px solid #002766; }}
+            td {{ padding: 5px 4px; border: 1px solid #e0e0e0; color: #333; }}
+            tr:nth-child(even) {{ background-color: #f4f8fb; }}
+            .highlight-row td {{ background-color: #002766 !important; color: #ffffff !important; font-weight: bold !important; }}
+            .page-break {{ page-break-before: always; }}
+            .cenario-header {{ background-color: #eef4fc; border-left: 4px solid #006aff; padding: 10px; margin-top: 15px; margin-bottom: 10px; font-weight: bold; color: #002766; }}
         </style>
     </head>
     <body>
     {logo_html}
         <h1>Relatório Comparativo de Cenários</h1>
         <div class="header-meta">
-            Gerado em: {data_extracao} | Destino: {nome_destino}
+            Gerado em: {data_extracao}<br>
+            Base de Volumetria: Análise dos últimos 30 dias
+        </div>
+        <div class="context-box">
+            <div class="context-item"><span class="label">Destino / Lead:</span> {nome_destino}</div>
+            <div class="context-item"><span class="label">Estratégia Escolhida:</span> {estrategia}</div>
+            <div class="context-item"><span class="label">Municípios Absorvidos:</span> {cidades_movimentadas_str}</div>
         </div>
     """
+
+    # --- 1. RESUMO GERAL ---
+    html_content += f"""<h2>1. RESUMO COMPARATIVO DE CENÁRIOS</h2>"""
+    
+    df_resumo_html = df_comparativo.copy()
+    for c in df_resumo_html.columns:
+        if "Fat" in c or "Ticket" in c or "TK" in c or "Impacto" in c:
+            df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_money(x) if pd.notna(x) and isinstance(x, (int, float)) else x)
+        elif "%" in c or "Aum" in c:
+            df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_perc(x * 100) if pd.notna(x) and isinstance(x, (int, float)) else x)
+        elif "Vol" in c:
+            df_resumo_html[c] = df_resumo_html[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
 
     def generate_html_table(df):
         if df is None or df.empty: return "<p>Sem dados.</p>"
         html = "<table><thead><tr>"
-        for col in df.columns:
-            html += f"<th>{col}</th>"
+        for col in df.columns: html += f"<th>{col}</th>"
         html += "</tr></thead><tbody>"
         for _, row in df.iterrows():
             cls = ' class="highlight-row"' if str(row.iloc[0]).lower() == 'total geral' else ''
             html += f"<tr{cls}>"
-            for val in row:
-                html += f"<td>{val}</td>"
+            for val in row: html += f"<td>{val}</td>"
             html += "</tr>"
         html += "</tbody></table>"
         return html
 
-    html_content += f"""<h2>1. RESUMO COMPARATIVO DOS CENÁRIOS</h2>"""
-    
-    # Formatação do Resumo para HTML
-    df_resumo_html = df_resumo_comparativo.copy()
-    for c in df_resumo_html.columns:
-        if "R$" in c or "Faturamento" in c or "Ticket" in c or "Impacto" in c:
-            df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_money(x) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        elif "%" in c or "aumento" in c.lower():
-            df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_perc(x * 100) if pd.notna(x) and isinstance(x, (int, float)) else x)
-
     html_content += generate_html_table(df_resumo_html)
 
-    html_content += f"""
-        <div class="page-break"></div>
-        <h2>2. ABRANGÊNCIA COMPLETA PROJETADA</h2>
-    """
+    # --- 2. DETALHAMENTO POR CENÁRIO ---
+    html_content += f"""<div class="page-break"></div><h2>2. DETALHAMENTO POR CENÁRIO</h2>"""
+    
+    for cenario_nome, metricas in cenario_metrics.items():
+        html_content += f'<div class="cenario-header">{cenario_nome}</div>'
+        
+        # Visão Parceiro
+        html_content += f"""
+            <h3>Visão do Parceiro (Faturamento do Leve)</h3>
+            <div class="card-container">
+                <div class="card">
+                    <div class="metric-row"><span class="metric-label">Faturamento Atual:</span><span class="metric-value">{format_money(metricas['fat_antigo'])}</span><span class="metric-sub">(Vol: {int(metricas['vol_fat_antigo']):,} | TK: {format_money(metricas['tk_fat_antigo'])})</span></div>
+                    <div class="metric-row"><span class="metric-label">Novo Faturamento:</span><span class="metric-value">{format_money(metricas['fat_novo'])}</span><span class="metric-sub">(Vol: {int(metricas['vol_fat_novo']):,} | TK: {format_money(metricas['tk_fat_novo'])})</span></div>
+                    <div class="metric-row" style="margin-top: 5px; padding-top: 5px; border-top: 1px dashed #e0e0e0;"><span class="metric-label">Crescimento da Operação:</span><span class="metric-value">{get_indicator(metricas['cresc_fat'], False)} {get_perc_indicator(metricas['perc_cresc'], False)}</span></div>
+                </div>
+            </div>
+        """
+        # Visão Loggi
+        html_content += f"""
+            <h3>Visão LOGGI (Impacto Financeiro Real)</h3>
+            <div class="card-container">
+                <div class="card">
+                    <div class="metric-row"><span class="metric-label">Custo Antigo Global:</span><span class="metric-value">{format_money(metricas['loggi_antigo'])}</span><span class="metric-sub">(Vol: {int(metricas['vol_loggi']):,} | TK: {format_money(metricas['tk_loggi_antigo'])})</span></div>
+                    <div class="metric-row"><span class="metric-label">Novo Custo Projetado:</span><span class="metric-value">{format_money(metricas['loggi_novo'])}</span><span class="metric-sub">(Vol: {int(metricas['vol_loggi']):,} | TK: {format_money(metricas['tk_loggi_novo'])})</span></div>
+                    <div class="metric-row" style="margin-top: 5px; padding-top: 5px; border-top: 1px dashed #e0e0e0;"><span class="metric-label">Impacto Financeiro:</span><span class="metric-value">{get_indicator(metricas['imp_loggi'], True)} {get_perc_indicator(metricas['perc_imp_loggi'], True)}</span></div>
+                </div>
+            </div>
+        """
+        # Regiões
+        detalhes_reg = metricas.get('detalhes_regioes', {})
+        if detalhes_reg:
+            html_content += """<h3>Impacto por Região</h3>"""
+            for reg, dados in detalhes_reg.items():
+                tk_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
+                tk_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
+                imp_r = dados['custo_novo'] - dados['custo_antigo']
+                perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
+                ajuste = dados.get('ajuste', 0.0)
+                ajuste_html = f'<div class="region-alert">Aviso: Ajuste Comercial Aplicado de {ajuste:+.2f}%</div>' if ajuste != 0.0 else ''
+                
+                html_content += f"""
+                <div class="region-block">
+                    <div class="region-title">Região: {reg}</div>
+                    {ajuste_html}
+                    <div class="metric-row"><span class="metric-label">Custo Antigo:</span><span class="metric-value">{format_money(dados['custo_antigo'])}</span><span class="metric-sub">(TK: {format_money(tk_ant)})</span></div>
+                    <div class="metric-row"><span class="metric-label">Novo Custo:</span><span class="metric-value">{format_money(dados['custo_novo'])}</span><span class="metric-sub">(TK: {format_money(tk_nov)})</span></div>
+                    <div class="metric-row"><span class="metric-label">Variação no Budget:</span><span class="metric-value">{get_indicator(imp_r, True)} {get_perc_indicator(perc_r, True)}</span></div>
+                </div>
+                """
+
+    # --- 3. ABRANGENCIA ---
+    html_content += f"""<div class="page-break"></div><h2>3. ABRANGÊNCIA COMPLETA PROJETADA: {nome_destino}</h2>"""
     colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
     html_content += generate_html_table(df_abrangencia_out[colunas_abr_pdf])
 
-    html_content += f"""
-        <div class="page-break"></div>
-        <h2>3. TABELAS FRETE PESO PROJETADAS POR CENÁRIO</h2>
-    """
+    # --- 4. TABELAS PROJETADAS ---
+    html_content += f"""<div class="page-break"></div><h2>4. TABELAS FRETE PESO PROJETADAS</h2>"""
     for cenario_nome, df_tabela in dict_tabelas_out.items():
         html_content += f"<h3>{cenario_nome}</h3>"
-        df_tab_html = df_tabela.copy()
-        df_tab_html['Valor dentro do prazo'] = df_tab_html['Valor dentro do prazo'].apply(format_money)
-        df_tab_html['Valor fora do prazo'] = df_tab_html['Valor fora do prazo'].apply(format_money)
-        html_content += generate_html_table(df_tab_html)
+        df_ex = df_tabela.copy()
+        df_ex['Valor dentro do prazo'] = df_ex['Valor dentro do prazo'].apply(format_money)
+        df_ex['Valor fora do prazo'] = df_ex['Valor fora do prazo'].apply(format_money)
+        html_content += generate_html_table(df_ex)
 
-    html_content += """
-    </body>
-    </html>
-    """
+    # --- 5. TABELAS ATUAIS ---
+    if tabelas_atuais_pdf:
+        html_content += f"""<div class="page-break"></div><h2>5. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
+        for leve_nome, df_tab in tabelas_atuais_pdf.items():
+            html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
+            html_content += generate_html_table(df_tab)
+
+    html_content += """</body></html>"""
     
     pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
     return pdf_bytes
@@ -392,17 +449,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
     
         with st.expander("2. Seleção de Leves", expanded=True):
             leves_disponiveis = df_frete_clean['LMC name'].dropna().unique().tolist()
-            
             mapa_nomes = {}
             mapa_routing = {} 
-            
             for lmc in leves_disponiveis:
                 match = df_nomes_leves[df_nomes_leves['Leve'] == lmc]
                 if not match.empty:
                     nome_formatado = match['nome_completo'].values[0]
-                    routing_code = match['Routing Code'].values[0]
                     mapa_nomes[nome_formatado] = lmc
-                    mapa_routing[lmc] = routing_code
+                    mapa_routing[lmc] = match['Routing Code'].values[0]
                 else:
                     mapa_nomes[lmc] = lmc
                     mapa_routing[lmc] = "-"
@@ -427,16 +481,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     for _, row in df_cidades_estado.iterrows():
                         cid = str(row['Cidade'])
                         est = str(row['State'])
-                        txt_display = f"{cid} - {est}"
-                        opcoes_cidades[txt_display] = cid
+                        opcoes_cidades[f"{cid} - {est}"] = cid
                         
-                    lista_opcoes_display = sorted(list(opcoes_cidades.keys()))
                     with cols[idx]:
-                        cidade_escolhida_display = st.selectbox(
-                            f"Cidade Base para:\n{nome_exibicao}", 
-                            lista_opcoes_display, 
-                            key=f"cidade_{leve}"
-                        )
+                        cidade_escolhida_display = st.selectbox(f"Cidade Base para:\n{nome_exibicao}", sorted(list(opcoes_cidades.keys())), key=f"cidade_{leve}")
                         cidades_base_dict[leve] = opcoes_cidades[cidade_escolhida_display]
     
             with st.expander("4. Dados Atuais dos Leves Selecionados", expanded=False):
@@ -458,9 +506,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         df_abrangencia_leve = df_abrangencia[df_abrangencia['LMC Name'] == leve].copy()
                         df_abrangencia_leve['Routing Code'] = mapa_routing.get(leve, "-")
                         df_abrangencia_leve['SLO Local (Arquivo)'] = df_abrangencia_leve['Prazo adicional']
-                        col_ab = ['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']
-                        st.dataframe(df_abrangencia_leve[[c for c in col_ab if c in df_abrangencia_leve.columns]], use_container_width=True, hide_index=True)
-    
+                        st.dataframe(df_abrangencia_leve[['LMC Name', 'Routing Code', 'Região de preço', 'Cidade', 'State', 'SLO Local (Arquivo)']], use_container_width=True, hide_index=True)
+                        
             with st.expander("5. Definição do Leve/Lead de Destino", expanded=True):
                 tipo_destino = st.radio("O destino da movimentação será para:", ["Um Leve Existente (já selecionado)", "Um Novo Lead"])
                 nome_destino_final = ""
@@ -477,7 +524,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     with col_n3: cidade_base_destino = st.selectbox("Cidade Base do Novo Lead:", sorted(df_slos_clean[df_slos_clean['State'] == estado_lead]['Cidade'].tolist()))
     
             if nome_destino_final and cidade_base_destino:
-                with st.expander("6. Manipulação de Abrangência (Tabela Interativa)", expanded=True):
+                with st.expander("6. Manipulação de Abrangência", expanded=True):
                     config_key = f"{','.join(leves_selecionados)}_{nome_destino_final}"
                     if "mov_config_key" not in st.session_state or st.session_state.mov_config_key != config_key:
                         df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
@@ -537,7 +584,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 tabela_base_selecionada = mapa_nomes.get(nome_base_display)
                         pode_prosseguir = True
                 
-                # --- PROCESSAMENTO ---
+                # --- PROCESSAMENTO DOS RESULTADOS ---
                 if pode_prosseguir:
                     if tipo_destino == "Um Leve Existente (já selecionado)":
                         df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
@@ -559,17 +606,15 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     
                     regioes_finais_destino = sorted(df_escopo_final['Região de preço'].unique().tolist())
                     
-                    # CÁLCULO DE CONTEXTO (Seção 8)
+                    # Levantar contexto base
                     context_data = []
                     for reg in regioes_finais_destino:
                         cidades_reg = df_escopo_final[df_escopo_final['Região de preço'] == reg]
                         bases_envolvidas = df_volume[df_volume['Cidade'].isin(cidades_reg['Cidade'])]['Leve'].unique()
-                        
                         for base in bases_envolvidas:
                             vols = df_volume[(df_volume['Leve'] == base) & (df_volume['Cidade'].isin(cidades_reg['Cidade']))]
                             vol_total = vols['# Total Packages'].sum()
                             custo_total = 0
-                            
                             tb = df_frete_clean[(df_frete_clean['LMC name'] == base) & (df_frete_clean['label'] == reg)]
                             fx1 = tb[tb['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
                             val_fx1 = fx1['on time amount'].values[0] if not fx1.empty else 0
@@ -583,23 +628,15 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 
                             tk_medio = custo_total / vol_total if vol_total > 0 else 0
                             if vol_total > 0:
-                                context_data.append({
-                                    "Região de Preço": reg,
-                                    "Base (Origem/Atual)": base,
-                                    "Volumetria (30d)": int(vol_total),
-                                    "Valor 1ª Faixa Atual": formatar_moeda(val_fx1),
-                                    "Ticket Médio Atual": formatar_moeda(tk_medio)
-                                })
+                                context_data.append({"Região de Preço": reg, "Base (Origem/Atual)": base, "Volumetria (30d)": int(vol_total), "Valor 1ª Faixa Atual": formatar_moeda(val_fx1), "Ticket Médio Atual": formatar_moeda(tk_medio)})
                     
                     with st.expander("8. Ajustes Comerciais e Cenários", expanded=True):
                         st.markdown("### ℹ️ Contexto Atual das Regiões Envolvidas")
-                        if context_data:
-                            st.dataframe(pd.DataFrame(context_data), hide_index=True, use_container_width=True)
-                        else:
-                            st.info("Nenhuma volumetria recente encontrada para as cidades selecionadas.")
+                        if context_data: st.dataframe(pd.DataFrame(context_data), hide_index=True, use_container_width=True)
+                        else: st.info("Nenhuma volumetria recente encontrada para as cidades selecionadas.")
                             
                         st.markdown("### 🎛️ Configuração de Cenários")
-                        cenarios_nomes = ["Cenário 1 (Proposta do Lead)", "Cenário 2 (Nossa Contraproposta)"]
+                        cenarios_nomes = [f"Cenário {i+1}" for i in range(st.session_state["num_cenarios"])]
                         tabs_cenarios = st.tabs(cenarios_nomes)
                         
                         for c_idx, tab in enumerate(tabs_cenarios):
@@ -638,31 +675,32 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             st.button("Zerar", key=f"btn_zerar_{cen_id}_{regiao}", on_click=zerar_reg, use_container_width=True)
                                         st.markdown("<br>", unsafe_allow_html=True)
 
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("➕ Adicionar Novo Cenário"):
+                            st.session_state["num_cenarios"] += 1
+                            st.rerun()
+
                     with st.expander("9. Resumo Comparativo de Cenários", expanded=True):
                         st.success(f"Cálculos finalizados para **{nome_destino_final}**!")
                         
                         resultados_cenarios = []
                         dict_tabelas_finais = {}
+                        cenario_metrics = {}
                         
-                        # Loop para calcular C1 e C2
-                        for c_idx, cenario_nome in enumerate(cenarios_nomes):
-                            cen_id = f"c{c_idx+1}"
+                        for cenario_nome in cenarios_nomes:
+                            cen_id = f"c{cenarios_nomes.index(cenario_nome)+1}"
                             lista_tabelas_regiao = []
-                            
-                            fat_atual_total = 0
-                            fat_simulado_total = 0
-                            vol_total_cenario = 0
+                            g_vol_dest = 0; g_custo_dest = 0
+                            g_vol_migr = 0; g_custo_migr = 0
+                            g_custo_novo = 0
+                            detalhes_regioes = {}
                             
                             for regiao in regioes_finais_destino:
                                 cidades_mov_regiao = df_movidos[df_movidos['Região de preço'] == regiao]
-                                custo_alvo_on = 0
-                                soma_vol_mult = 0
-                                vol_regiao = 0
-                                custo_atual_regiao = 0
+                                custo_alvo_on = 0; soma_vol_mult = 0
                                 
                                 mult_dict = dict(zip(df_price_var_clean['Faixa de peso cubado (g)'], df_price_var_clean['Multiplicador']))
                                 
-                                # 1. Levantar Baseline da Região
                                 def calc_base_vol(cidades_df, lmc_col):
                                     v = 0; c_on = 0; s_mult = 0; c_atual = 0
                                     for _, row in cidades_df.iterrows():
@@ -675,21 +713,17 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_orig) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
                                             p_on = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
                                             
-                                            v += qtd
-                                            c_atual += qtd * p_on
-                                            c_on += qtd * p_on
-                                            s_mult += qtd * mult_dict.get(fx, 1.0)
+                                            v += qtd; c_atual += qtd * p_on; c_on += qtd * p_on; s_mult += qtd * mult_dict.get(fx, 1.0)
                                     return v, c_on, s_mult, c_atual
 
                                 if regiao in df_movidos['Região de preço'].unique() and estrategia_preco == "Gerar Tabela Equivalente (Focada em manter Impacto Neutro)":
                                     v1, co1, sm1, ca1 = calc_base_vol(cidades_mov_regiao, 'LMC Name')
-                                    vol_regiao += v1; custo_alvo_on += co1; soma_vol_mult += sm1; custo_atual_regiao += ca1
-                                    
+                                    custo_alvo_on += co1; soma_vol_mult += sm1
                                     if tipo_destino == "Um Leve Existente (já selecionado)":
                                         cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
                                         cidades_exist['LMC Dummy'] = nome_destino_final
                                         v2, co2, sm2, ca2 = calc_base_vol(cidades_exist, 'LMC Dummy')
-                                        vol_regiao += v2; custo_alvo_on += co2; soma_vol_mult += sm2; custo_atual_regiao += ca2
+                                        custo_alvo_on += co2; soma_vol_mult += sm2
                                         
                                     base_on = custo_alvo_on / soma_vol_mult if soma_vol_mult > 0 else 0
                                 else:
@@ -699,29 +733,30 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     base_on = nova_faixa1_on / 0.83
                                     
                                     v1, co1, sm1, ca1 = calc_base_vol(cidades_mov_regiao, 'LMC Name')
-                                    vol_regiao += v1; custo_atual_regiao += ca1; soma_vol_mult += sm1
+                                    soma_vol_mult += sm1
                                     if tipo_destino == "Um Leve Existente (já selecionado)":
                                         cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
                                         cidades_exist['LMC Dummy'] = nome_destino_final
                                         v2, co2, sm2, ca2 = calc_base_vol(cidades_exist, 'LMC Dummy')
-                                        vol_regiao += v2; custo_atual_regiao += ca2; soma_vol_mult += sm2
+                                        soma_vol_mult += sm2
 
-                                # 2. Construir Tabela Região e Aplicar Ajuste
                                 df_regiao_tabela = df_price_var_clean.copy()
                                 df_regiao_tabela['Região de Preço'] = regiao
                                 df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
-                                df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_on # Simplificado fora do prazo
+                                df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
                                 
                                 ajuste_tipo = st.session_state.get(f"tipo_{cen_id}_{regiao}", "%")
                                 ajuste_val = st.session_state.get(f"val_{cen_id}_{regiao}", 0.0)
                                 ajuste_perc = 0.0
+                                
+                                vol_regiao_total_sim = v1 + (v2 if 'v2' in locals() else 0)
                                 
                                 if ajuste_val != 0.0:
                                     if ajuste_tipo == "R$ (1ª Faixa)":
                                         val_fx1_atual = base_on * 0.83
                                         if val_fx1_atual > 0: ajuste_perc = ((ajuste_val / val_fx1_atual) - 1) * 100
                                     elif ajuste_tipo == "R$ (Ticket Médio)":
-                                        tk_projetado_base = (base_on * soma_vol_mult) / vol_regiao if vol_regiao > 0 else 0
+                                        tk_projetado_base = (base_on * soma_vol_mult) / vol_regiao_total_sim if vol_regiao_total_sim > 0 else 0
                                         if tk_projetado_base > 0: ajuste_perc = ((ajuste_val / tk_projetado_base) - 1) * 100
                                     else:
                                         ajuste_perc = ajuste_val
@@ -732,92 +767,222 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     
                                 lista_tabelas_regiao.append(df_regiao_tabela[['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']])
                                 
-                                # 3. Calcular Custo Simulado Desta Regiao
-                                custo_simulado_regiao = 0
-                                for _, prow in df_regiao_tabela.iterrows():
-                                    fx = prow['Faixa de peso cubado (g)']
-                                    p_novo = prow['Valor dentro do prazo']
-                                    
-                                    def count_vol(cidades_df, lmc_col):
-                                        vol_fx = 0
-                                        for _, r in cidades_df.iterrows():
-                                            vols = df_volume[(df_volume['Leve'] == r[lmc_col]) & (df_volume['Cidade_Normalizada'] == normalize_string(r['Cidade'])) & (df_volume['Faixa de peso cubado (g)'] == fx)]
-                                            vol_fx += vols['# Total Packages'].sum() if not vols.empty else 0
-                                        return vol_fx
-                                        
-                                    v_fx = count_vol(cidades_mov_regiao, 'LMC Name')
-                                    if tipo_destino == "Um Leve Existente (já selecionado)":
-                                        cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
-                                        cidades_exist['LMC Dummy'] = nome_destino_final
-                                        v_fx += count_vol(cidades_exist, 'LMC Dummy')
-                                        
-                                    custo_simulado_regiao += v_fx * p_novo
+                                reg_vol = 0; reg_c_antigo = 0; reg_c_novo = 0
                                 
-                                fat_atual_total += custo_atual_regiao
-                                fat_simulado_total += custo_simulado_regiao
-                                vol_total_cenario += vol_regiao
+                                def calc_costs(cidades_df, lmc_col):
+                                    v = 0; c_ant = 0; c_nov = 0
+                                    for _, r in cidades_df.iterrows():
+                                        vols = df_volume[(df_volume['Leve'] == r[lmc_col]) & (df_volume['Cidade_Normalizada'] == normalize_string(r['Cidade']))]
+                                        for _, v_row in vols.iterrows():
+                                            fx = v_row['Faixa de peso cubado (g)']
+                                            qtd = v_row['# Total Packages']
+                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == r[lmc_col]) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
+                                            preco_ant = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
+                                            tb_nova = df_regiao_tabela[df_regiao_tabela['Faixa de peso cubado (g)'] == fx]
+                                            preco_nov = tb_nova['Valor dentro do prazo'].values[0] if not tb_nova.empty else 0
+                                            
+                                            v += qtd; c_ant += qtd * preco_ant; c_nov += qtd * preco_nov
+                                    return v, c_ant, c_nov
+
+                                v_m, c_a_m, c_n_m = calc_costs(cidades_mov_regiao, 'LMC Name')
+                                g_vol_migr += v_m; g_custo_migr += c_a_m; g_custo_novo += c_n_m
+                                reg_vol += v_m; reg_c_antigo += c_a_m; reg_c_novo += c_n_m
+                                
+                                if tipo_destino == "Um Leve Existente (já selecionado)":
+                                    cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
+                                    cidades_exist['LMC Dummy'] = nome_destino_final
+                                    v_d, c_a_d, c_n_d = calc_costs(cidades_exist, 'LMC Dummy')
+                                    g_vol_dest += v_d; g_custo_dest += c_a_d; g_custo_novo += c_n_d
+                                    reg_vol += v_d; reg_c_antigo += c_a_d; reg_c_novo += c_n_d
+                                
+                                detalhes_regioes[regiao] = {'vol': reg_vol, 'custo_antigo': reg_c_antigo, 'custo_novo': reg_c_novo, 'ajuste': ajuste_perc}
                                 
                                 resultados_cenarios.append({
                                     "Cenário": cenario_nome,
                                     "Região de Preço": regiao,
-                                    "Volumetria": vol_regiao,
-                                    "Faturamento Atual": custo_atual_regiao,
-                                    "Ticket Médio Atual": custo_atual_regiao / vol_regiao if vol_regiao > 0 else 0,
-                                    "Faturamento Projetado": custo_simulado_regiao,
-                                    "Ticket Médio Projetado": custo_simulado_regiao / vol_regiao if vol_regiao > 0 else 0,
-                                    "Impacto Financeiro (R$)": custo_simulado_regiao - custo_atual_regiao,
-                                    "% Aumento": (custo_simulado_regiao / custo_atual_regiao - 1) if custo_atual_regiao > 0 else 0
+                                    "Volumetria": reg_vol,
+                                    "Faturamento Atual": reg_c_antigo,
+                                    "Ticket Médio Atual": reg_c_antigo / reg_vol if reg_vol > 0 else 0,
+                                    "Faturamento Projetado": reg_c_novo,
+                                    "Ticket Médio Projetado": reg_c_novo / reg_vol if reg_vol > 0 else 0,
+                                    "Impacto Financeiro (R$)": reg_c_novo - reg_c_antigo,
+                                    "% Aumento": (reg_c_novo / reg_c_antigo - 1) if reg_c_antigo > 0 else 0
                                 })
                             
-                            # Consolida Tabela do Cenário
                             df_tabela_final = pd.concat(lista_tabelas_regiao, ignore_index=True)
                             df_tabela_final.rename(columns={'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'}, inplace=True)
                             dict_tabelas_finais[cenario_nome] = df_tabela_final
                             
-                            # Adiciona a linha Total do Cenário
+                            vol_total = g_vol_dest + g_vol_migr
+                            c_antigo_total = g_custo_dest + g_custo_migr
+                            
                             resultados_cenarios.append({
                                 "Cenário": cenario_nome,
                                 "Região de Preço": "Total Geral",
-                                "Volumetria": vol_total_cenario,
-                                "Faturamento Atual": fat_atual_total,
-                                "Ticket Médio Atual": fat_atual_total / vol_total_cenario if vol_total_cenario > 0 else 0,
-                                "Faturamento Projetado": fat_simulado_total,
-                                "Ticket Médio Projetado": fat_simulado_total / vol_total_cenario if vol_total_cenario > 0 else 0,
-                                "Impacto Financeiro (R$)": fat_simulado_total - fat_atual_total,
-                                "% Aumento": (fat_simulado_total / fat_atual_total - 1) if fat_atual_total > 0 else 0
+                                "Volumetria": vol_total,
+                                "Faturamento Atual": c_antigo_total,
+                                "Ticket Médio Atual": c_antigo_total / vol_total if vol_total > 0 else 0,
+                                "Faturamento Projetado": g_custo_novo,
+                                "Ticket Médio Projetado": g_custo_novo / vol_total if vol_total > 0 else 0,
+                                "Impacto Financeiro (R$)": g_custo_novo - c_antigo_total,
+                                "% Aumento": (g_custo_novo / c_antigo_total - 1) if c_antigo_total > 0 else 0
                             })
+                            
+                            cenario_metrics[cenario_nome] = {
+                                'fat_antigo': g_custo_dest,
+                                'vol_fat_antigo': g_vol_dest,
+                                'tk_fat_antigo': g_custo_dest / g_vol_dest if g_vol_dest > 0 else 0,
+                                'fat_novo': g_custo_novo,
+                                'vol_fat_novo': vol_total,
+                                'tk_fat_novo': g_custo_novo / vol_total if vol_total > 0 else 0,
+                                'cresc_fat': g_custo_novo - g_custo_dest,
+                                'perc_cresc': ((g_custo_novo - g_custo_dest) / g_custo_dest * 100) if g_custo_dest > 0 else 0,
+                                'loggi_antigo': c_antigo_total,
+                                'vol_loggi': vol_total,
+                                'tk_loggi_antigo': c_antigo_total / vol_total if vol_total > 0 else 0,
+                                'loggi_novo': g_custo_novo,
+                                'tk_loggi_novo': g_custo_novo / vol_total if vol_total > 0 else 0,
+                                'imp_loggi': g_custo_novo - c_antigo_total,
+                                'perc_imp_loggi': ((g_custo_novo - c_antigo_total) / c_antigo_total * 100) if c_antigo_total > 0 else 0,
+                                'detalhes_regioes': detalhes_regioes
+                            }
 
-                        # Transforma resultados em DataFrame Comparativo
                         df_res_bruto = pd.DataFrame(resultados_cenarios)
-                        
-                        # Pivotando a tabela para colocar C1 e C2 lado a lado
                         df_base_atual = df_res_bruto[df_res_bruto['Cenário'] == cenarios_nomes[0]][['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual']]
+                        df_comparativo = df_base_atual.copy()
                         
-                        df_c1 = df_res_bruto[df_res_bruto['Cenário'] == cenarios_nomes[0]][['Região de Preço', 'Faturamento Projetado', 'Ticket Médio Projetado', 'Impacto Financeiro (R$)', '% Aumento']]
-                        df_c1.columns = ['Região de Preço', f'Fat. {cenarios_nomes[0]}', f'TK {cenarios_nomes[0]}', f'Impacto {cenarios_nomes[0]}', f'% Aum. {cenarios_nomes[0]}']
+                        for cen in cenarios_nomes:
+                            df_c = df_res_bruto[df_res_bruto['Cenário'] == cen][['Região de Preço', 'Faturamento Projetado', 'Ticket Médio Projetado', 'Impacto Financeiro (R$)', '% Aumento']]
+                            df_c.columns = ['Região de Preço', f'Fat. {cen}', f'TK {cen}', f'Impacto {cen}', f'% Aum. {cen}']
+                            df_comparativo = df_comparativo.merge(df_c, on='Região de Preço')
                         
-                        df_c2 = df_res_bruto[df_res_bruto['Cenário'] == cenarios_nomes[1]][['Região de Preço', 'Faturamento Projetado', 'Ticket Médio Projetado', 'Impacto Financeiro (R$)', '% Aumento']]
-                        df_c2.columns = ['Região de Preço', f'Fat. {cenarios_nomes[1]}', f'TK {cenarios_nomes[1]}', f'Impacto {cenarios_nomes[1]}', f'% Aum. {cenarios_nomes[1]}']
-                        
-                        df_comparativo = df_base_atual.merge(df_c1, on='Região de Preço').merge(df_c2, on='Região de Preço')
-                        
-                        # Move a linha "Total Geral" para o final
                         row_total = df_comparativo[df_comparativo['Região de Preço'] == 'Total Geral']
                         df_comparativo = df_comparativo[df_comparativo['Região de Preço'] != 'Total Geral']
                         df_comparativo = pd.concat([df_comparativo, row_total], ignore_index=True)
                         
-                        st.markdown("### Quadro Resumo de Cenários")
-                        # Formatação para exibir bonito no Streamlit
-                        df_disp = df_comparativo.copy()
-                        for c in df_disp.columns:
-                            if "Fat" in c or "TK" in c or "Impacto" in c:
-                                df_disp[c] = df_disp[c].apply(lambda x: formatar_moeda(x) if pd.notna(x) else "-")
-                            elif "%" in c or "Aum" in c:
-                                df_disp[c] = df_disp[c].apply(lambda x: f"{x*100:+.2f}%" if pd.notna(x) else "-")
-                            elif "Vol" in c:
-                                df_disp[c] = df_disp[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
+                        # --- EXIBIÇÃO EM ABAS (SEÇÃO 9) ---
+                        tabs_res = st.tabs(["📊 Resumo Geral"] + cenarios_nomes)
                         
-                        st.dataframe(df_disp, hide_index=True, use_container_width=True)
+                        with tabs_res[0]:
+                            st.markdown("### 🏆 Destaques do Cenário Atual")
+                            tk_global_atual = cenario_metrics[cenarios_nomes[0]]['tk_loggi_antigo']
+                            vol_global_atual = cenario_metrics[cenarios_nomes[0]]['vol_loggi']
+                            
+                            st.metric("Ticket Médio Atual Global", formatar_moeda(tk_global_atual), f"Volume Total: {int(vol_global_atual):,} pacotes", delta_color="off")
+                            
+                            st.markdown("### 🚀 Impacto dos Cenários Simulados")
+                            cols_destaques = st.columns(len(cenarios_nomes))
+                            for idx, cen in enumerate(cenarios_nomes):
+                                m = cenario_metrics[cen]
+                                with cols_destaques[idx]:
+                                    st.markdown(f"**{cen}**")
+                                    t_novo = formatar_moeda(m['tk_loggi_novo'])
+                                    imp = m['imp_loggi']
+                                    imp_perc = m['perc_imp_loggi']
+                                    
+                                    st.markdown(f"**Ticket Médio:** {t_novo}")
+                                    if imp > 0:
+                                        st.markdown(f"**Diferença Mensal:** <span style='color:#ff4b4b'>▲ +{formatar_moeda(imp)}</span>", unsafe_allow_html=True)
+                                        st.markdown(f"**% Aumento:** <span style='color:#ff4b4b'>▲ +{imp_perc:.2f}%</span>", unsafe_allow_html=True)
+                                    elif imp < 0:
+                                        st.markdown(f"**Diferença Mensal:** <span style='color:#09ab3b'>▼ -{formatar_moeda(abs(imp))}</span>", unsafe_allow_html=True)
+                                        st.markdown(f"**% Aumento:** <span style='color:#09ab3b'>▼ {imp_perc:.2f}%</span>", unsafe_allow_html=True)
+                                    else:
+                                        st.markdown(f"**Diferença Mensal:** <span style='color:gray'>■ R$ 0,00</span>", unsafe_allow_html=True)
+                                        st.markdown(f"**% Aumento:** <span style='color:gray'>■ 0.00%</span>", unsafe_allow_html=True)
+                            
+                            st.divider()
+                            st.markdown("### 📋 Quadro Resumo Comparativo")
+                            
+                            df_disp = df_comparativo.copy()
+                            for c in df_disp.columns:
+                                if "Fat" in c or "Ticket" in c or "TK" in c or "Impacto" in c:
+                                    df_disp[c] = df_disp[c].apply(lambda x: formatar_moeda(x) if pd.notna(x) else "-")
+                                elif "%" in c or "Aum" in c:
+                                    df_disp[c] = df_disp[c].apply(lambda x: f"{x*100:+.2f}%" if pd.notna(x) else "-")
+                                elif "Vol" in c:
+                                    df_disp[c] = df_disp[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
+                            
+                            def highlight_total_row(row):
+                                if row['Região de Preço'] == 'Total Geral':
+                                    return ['background-color: #002766; color: white; font-weight: bold; text-align: center;'] * len(row)
+                                return ['text-align: center;'] * len(row)
+                            
+                            styled_df = df_disp.style.apply(highlight_total_row, axis=1)
+                            st.dataframe(styled_df, hide_index=True, use_container_width=True)
+
+                        for idx, cen in enumerate(cenarios_nomes):
+                            with tabs_res[idx+1]:
+                                m = cenario_metrics[cen]
+                                st.subheader(f"🤝 Visão do Parceiro ({cen})")
+                                cp1, cp2, cp3 = st.columns(3)
+                                with cp1:
+                                    st.metric("Faturamento Atual (Sem Novas Cidades)", formatar_moeda(m['fat_antigo']))
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(m['vol_fat_antigo']):,} pacotes</span>", unsafe_allow_html=True)
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(m['tk_fat_antigo'])}</span>", unsafe_allow_html=True)
+                                with cp2:
+                                    st.metric("Novo Faturamento Projetado", formatar_moeda(m['fat_novo']))
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(m['vol_fat_novo']):,} pacotes</span>", unsafe_allow_html=True)
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(m['tk_fat_novo'])}</span>", unsafe_allow_html=True)
+                                with cp3:
+                                    st.metric("Crescimento da Operação", formatar_moeda(m['cresc_fat']))
+                                    st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▲ +{m['perc_cresc']:.2f}% de aumento no faturamento</span>", unsafe_allow_html=True)
+
+                                st.divider()
+                                st.subheader(f"📉 Visão Loggi ({cen})")
+                                cl1, cl2, cl3 = st.columns(3)
+                                with cl1:
+                                    st.metric("Custo Antigo Global", formatar_moeda(m['loggi_antigo']))
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Antigo: {formatar_moeda(m['tk_loggi_antigo'])}</span>", unsafe_allow_html=True)
+                                with cl2:
+                                    st.metric("Novo Custo Global Projetado", formatar_moeda(m['loggi_novo']))
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
+                                    st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
+                                with cl3:
+                                    if m['imp_loggi'] > 0:
+                                        st.metric("Impacto Financeiro Loggi", formatar_moeda(m['imp_loggi']), f"+{formatar_moeda(m['imp_loggi'])} (Aumento)", delta_color="inverse")
+                                        st.markdown(f"<span style='font-size: 0.9em; color: #ff4b4b; font-weight: bold;'>▲ +{m['perc_imp_loggi']:.2f}% de impacto no budget</span>", unsafe_allow_html=True)
+                                    elif m['imp_loggi'] < 0:
+                                        st.metric("Impacto Financeiro Loggi", formatar_moeda(m['imp_loggi']), f"{formatar_moeda(m['imp_loggi'])} (Economia)", delta_color="normal")
+                                        st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▼ {m['perc_imp_loggi']:.2f}% de economia no budget</span>", unsafe_allow_html=True)
+                                    else:
+                                        st.metric("Impacto Financeiro Loggi", "R$ 0,00", "Neutro")
+                                        st.markdown(f"<span style='font-size: 0.9em; color: gray;'>0.00%</span>", unsafe_allow_html=True)
+                                
+                                if m['detalhes_regioes']:
+                                    st.markdown(f"#### 🔍 Detalhamento das Regiões ({cen})")
+                                    for reg, dados in m['detalhes_regioes'].items():
+                                        st.markdown(f"##### 📍 {reg}")
+                                        ajuste_aplicado = dados.get('ajuste', 0.0)
+                                        if ajuste_aplicado != 0.0:
+                                            st.markdown(f"<span style='font-size: 0.9em; color: #e67e22; font-weight: bold;'>Aviso: Ajuste Comercial Aplicado de {ajuste_aplicado:+.2f}%</span>", unsafe_allow_html=True)
+                                        cd1, cd2, cd3 = st.columns(3)
+                                        tk_r_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
+                                        tk_r_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
+                                        imp_r = dados['custo_novo'] - dados['custo_antigo']
+                                        perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
+                                        with cd1:
+                                            st.markdown(f"**Custo Antigo:** {formatar_moeda(dados['custo_antigo'])}")
+                                            st.markdown(f"<span style='font-size: 0.8em; color: gray;'>Vol: {int(dados['vol']):,} | Tk: {formatar_moeda(tk_r_ant)}</span>", unsafe_allow_html=True)
+                                        with cd2:
+                                            st.markdown(f"**Novo Custo:** {formatar_moeda(dados['custo_novo'])}")
+                                            st.markdown(f"<span style='font-size: 0.8em; color: gray;'>Vol: {int(dados['vol']):,} | Tk: {formatar_moeda(tk_r_nov)}</span>", unsafe_allow_html=True)
+                                        with cd3:
+                                            color = "gray"
+                                            if imp_r > 0: color = "#ff4b4b"
+                                            elif imp_r < 0: color = "#09ab3b"
+                                            st.markdown(f"**Variação:** <span style='color: {color}; font-weight: bold;'>{formatar_moeda(imp_r)} ({perc_r:+.2f}%)</span>", unsafe_allow_html=True)
+
+                        st.divider()
+                        st.subheader("Tabelas de Frete Peso e Abrangência")
+                        st.dataframe(df_escopo_final[colunas_finais_abrangencia], hide_index=True, use_container_width=True)
+                        for cen, df_tab in dict_tabelas_finais.items():
+                            st.markdown(f"**Tabela Projetada - {cen}**")
+                            df_exibicao_tabela = df_tab.copy()
+                            df_exibicao_tabela['Valor dentro do prazo'] = df_exibicao_tabela['Valor dentro do prazo'].apply(formatar_moeda)
+                            df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
+                            st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
 
                         st.divider()
                         
@@ -847,10 +1012,16 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("Resumo em PDF com o quadro comparativo e tabelas.")
                             
                             if HAS_PDF_GENERATOR:
+                                if not df_movidos.empty:
+                                    cidades_movimentadas_str = ", ".join(sorted(df_movidos['Cidade'].str.title().unique().tolist()))
+                                else:
+                                    cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
+
                                 pdf_data = generate_html_pdf(
-                                    nome_destino_final, df_comparativo, None, 
+                                    nome_destino_final, estrategia_preco, cidades_movimentadas_str, 
+                                    df_comparativo, cenario_metrics, 
                                     df_escopo_final[colunas_finais_abrangencia], 
-                                    dict_tabelas_finais
+                                    dict_tabelas_finais, tabelas_atuais_pdf
                                 )
                                 st.download_button(
                                     label="Baixar Relatório (PDF)",
