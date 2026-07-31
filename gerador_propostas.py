@@ -548,7 +548,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
             perc_r = (imp_r / dados['custo_antigo']) * 100 if dados['custo_antigo'] > 0 else 0
             
             ajuste = dados.get('ajuste', 0.0)
-            # Removemos os emojis que quebravam o PDF e deixamos um aviso limpo
             ajuste_html = f'<div class="region-alert">Aviso: Ajuste Comercial Aplicado de {ajuste:+.2f}%</div>' if ajuste != 0.0 else ''
             
             html_content += f"""
@@ -944,41 +943,50 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     regioes_movimentadas = df_movidos['Região de preço'].unique()
 
                     for regiao in regioes_finais_destino:
-                        if f"ajuste_{regiao}" not in st.session_state:
-                            st.session_state[f"ajuste_{regiao}"] = 0.0
+                        if f"ajuste_tipo_{regiao}" not in st.session_state:
+                            st.session_state[f"ajuste_tipo_{regiao}"] = "%"
+                        if f"ajuste_val_{regiao}" not in st.session_state:
+                            st.session_state[f"ajuste_val_{regiao}"] = 0.0
 
                     def aplicar_ajuste_global():
-                        val = st.session_state.ajuste_global_input
+                        tipo = st.session_state.ajuste_global_tipo
+                        val = st.session_state.ajuste_global_val
                         for r in regioes_finais_destino:
-                            st.session_state[f"ajuste_{r}"] = val
+                            st.session_state[f"ajuste_tipo_{r}"] = tipo
+                            st.session_state[f"ajuste_val_{r}"] = val
 
                     def zerar_ajuste_regiao(r):
-                        st.session_state[f"ajuste_{r}"] = 0.0
+                        st.session_state[f"ajuste_tipo_{r}"] = "%"
+                        st.session_state[f"ajuste_val_{r}"] = 0.0
 
                     with st.expander("8. Ajustes Comerciais (Opcional)", expanded=True):
-                        st.markdown("Insira um percentual de reajuste (positivo ou negativo) para as tabelas do Leve de destino. Deixe 0 para manter o valor calculado.")
+                        st.markdown("Ajuste as tabelas de destino aplicando um percentual de reajuste ou definindo o valor cravado da 1ª Faixa (0 a 300g). Deixe 0 para manter o valor calculado.")
                         
                         st.markdown("**Ajuste em Massa:**")
-                        cg1, cg2, cg3 = st.columns([1.5, 2, 4])
+                        cg1, cg2, cg3, cg4 = st.columns([1.5, 1.5, 2, 3])
                         with cg1:
-                            st.number_input("Todas as regiões (%)", step=0.5, format="%.2f", key="ajuste_global_input")
+                            st.selectbox("Tipo de Ajuste", ["%", "R$ (1ª Faixa)"], key="ajuste_global_tipo")
                         with cg2:
+                            st.number_input("Valor", step=0.5, format="%.2f", key="ajuste_global_val")
+                        with cg3:
                             st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                             st.button("Aplicar a todas", on_click=aplicar_ajuste_global)
                             
                         st.divider()
                         
                         st.markdown("**Ajustes Individuais:**")
-                        ajustes_dict = {}
                         cols_ajuste = st.columns(3)
                         for i, regiao in enumerate(sorted(regioes_finais_destino)):
                             with cols_ajuste[i % 3]:
-                                c_input, c_btn = st.columns([2, 1])
-                                with c_input:
-                                    ajustes_dict[regiao] = st.number_input(f"Ajuste {regiao} (%)", step=0.5, format="%.2f", key=f"ajuste_{regiao}")
+                                st.markdown(f"**{regiao}**")
+                                c_tipo, c_val, c_btn = st.columns([2, 2, 1.5])
+                                with c_tipo:
+                                    st.selectbox("Tipo", ["%", "R$ (1ª Faixa)"], key=f"ajuste_tipo_{regiao}", label_visibility="collapsed")
+                                with c_val:
+                                    st.number_input("Valor", step=0.5, format="%.2f", key=f"ajuste_val_{regiao}", label_visibility="collapsed")
                                 with c_btn:
-                                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-                                    st.button("Zerar", key=f"btn_zerar_{regiao}", on_click=zerar_ajuste_regiao, args=(regiao,))
+                                    st.button("Zerar", key=f"btn_zerar_{regiao}", on_click=zerar_ajuste_regiao, args=(regiao,), use_container_width=True)
+                                st.markdown("<br>", unsafe_allow_html=True)
 
                     with st.expander("9. Resultados e Impacto Financeiro (Proposta)", expanded=True):
                         st.success(f"Proposta gerada para **{nome_destino_final}**!")
@@ -1104,13 +1112,31 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
                                 df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_out
                                 
-                                ajuste_perc = ajustes_dict.get(regiao, 0.0)
-                                if ajuste_perc != 0.0:
-                                    fator = 1 + (ajuste_perc / 100)
-                                    df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
-                                    df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
-                                    texto_explicativo.append(f"\n>> PASSO 4: Ajuste Comercial")
-                                    texto_explicativo.append(f"Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
+                                ajuste_tipo = st.session_state.get(f"ajuste_tipo_{regiao}", "%")
+                                ajuste_val = st.session_state.get(f"ajuste_val_{regiao}", 0.0)
+                                ajuste_perc = 0.0
+                                
+                                if ajuste_val != 0.0:
+                                    if ajuste_tipo == "R$ (1ª Faixa)":
+                                        fx1_row = df_price_var_clean[df_price_var_clean['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
+                                        mult_faixa1 = fx1_row['Multiplicador'].values[0] if not fx1_row.empty else 0.83
+                                        valor_atual_faixa1 = base_on * mult_faixa1
+                                        
+                                        if valor_atual_faixa1 > 0:
+                                            ajuste_perc = ((ajuste_val / valor_atual_faixa1) - 1) * 100
+                                        
+                                        fator = 1 + (ajuste_perc / 100)
+                                        df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
+                                        df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
+                                        texto_explicativo.append(f"\n>> PASSO 4: Ajuste Comercial")
+                                        texto_explicativo.append(f"Solicitado Faixa 1 a {formatar_moeda(ajuste_val)} (Implica em reajuste de {ajuste_perc:+.2f}% para a região {regiao}).\n")
+                                    else:
+                                        ajuste_perc = ajuste_val
+                                        fator = 1 + (ajuste_perc / 100)
+                                        df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
+                                        df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
+                                        texto_explicativo.append(f"\n>> PASSO 4: Ajuste Comercial")
+                                        texto_explicativo.append(f"Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
                                 
                                 for _, prow in df_regiao_tabela.iterrows():
                                     fx = prow['Faixa de peso cubado (g)']
@@ -1220,12 +1246,27 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 reg_custo_antigo_loggi = 0
                                 reg_custo_novo_loggi = 0
                                 
-                                ajuste_perc = ajustes_dict.get(regiao, 0.0)
-                                if ajuste_perc != 0.0:
-                                    fator = 1 + (ajuste_perc / 100)
-                                    df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
-                                    df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
-                                    texto_explicativo.append(f">> Ajuste Comercial: Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
+                                ajuste_tipo = st.session_state.get(f"ajuste_tipo_{regiao}", "%")
+                                ajuste_val = st.session_state.get(f"ajuste_val_{regiao}", 0.0)
+                                ajuste_perc = 0.0
+                                
+                                if ajuste_val != 0.0:
+                                    if ajuste_tipo == "R$ (1ª Faixa)":
+                                        fx1_row = df_regiao_tabela[df_regiao_tabela['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
+                                        valor_atual_faixa1 = fx1_row['Valor dentro do prazo'].values[0] if not fx1_row.empty else 0
+                                        if valor_atual_faixa1 > 0:
+                                            ajuste_perc = ((ajuste_val / valor_atual_faixa1) - 1) * 100
+                                        
+                                        fator = 1 + (ajuste_perc / 100)
+                                        df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
+                                        df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
+                                        texto_explicativo.append(f">> Ajuste Comercial: Solicitado Faixa 1 a {formatar_moeda(ajuste_val)} (Implica em reajuste de {ajuste_perc:+.2f}% para a região {regiao}).\n")
+                                    else:
+                                        ajuste_perc = ajuste_val
+                                        fator = 1 + (ajuste_perc / 100)
+                                        df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Valor dentro do prazo'] * fator
+                                        df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Valor fora do prazo'] * fator
+                                        texto_explicativo.append(f">> Ajuste Comercial: Aplicado reajuste de {ajuste_perc:+.2f}% negociado para a região {regiao}.\n")
                                     
                                 if tipo_destino == "Um Leve Existente (já selecionado)":
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
