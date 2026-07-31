@@ -151,192 +151,15 @@ def extrair_estado(nome_leve):
         return match.group(1)
     return None
 
-# --- FUNÇÕES DE LÓGICA E MATEMÁTICA ---
-def generate_comparativo_tables(df_auditoria):
-    """Gera as tabelas de variação de Tarifas e Tickets Médios com base na auditoria"""
-    if df_auditoria.empty:
-        return pd.DataFrame(), pd.DataFrame()
-        
-    df_auditoria['Routing Code'] = df_auditoria['Routing Code'].astype(str)
-    rc_list = [rc for rc in df_auditoria['Routing Code'].unique() if rc != "-" and pd.notna(rc)]
-    
-    if not rc_list:
-        rc_list = df_auditoria['LMC Atual / Origem'].unique()
-        col_id = 'LMC Atual / Origem'
-    else:
-        col_id = 'Routing Code'
-        
-    grp = df_auditoria.groupby(['Região de Preço', 'Faixa de peso cubado (g)', col_id]).agg({
-        'Pacotes (30 dias)': 'sum',
-        'Custo Antigo Total (R$)': 'sum',
-        'Novo Custo Total (R$)': 'sum',
-        'Tarifa Antiga (R$)': 'first',
-        'Tarifa Base Destino (R$)': 'first',
-        'Tarifa Nova Projetada (R$)': 'first',
-        'Ajuste Comercial (%)': 'first'
-    }).reset_index()
-    
-    grp['Custo Base Total (R$)'] = grp['Pacotes (30 dias)'] * grp['Tarifa Base Destino (R$)']
-    
-    rows_tarifa = []
-    rows_ticket = []
-    
-    total_vols = {rc: 0 for rc in rc_list}
-    total_custo_antigo = {rc: 0 for rc in rc_list}
-    total_custo_base = {rc: 0 for rc in rc_list}
-    total_custo_novo = {rc: 0 for rc in rc_list}
-    
-    for (reg, faixa), group in grp.groupby(['Região de Preço', 'Faixa de peso cubado (g)']):
-        row_tar = {'Região de Preço': reg, 'Faixa de peso cubado (g)': faixa}
-        row_tck = {'Região de Preço': reg, 'Faixa de peso cubado (g)': faixa}
-        
-        vol_total = group['Pacotes (30 dias)'].sum()
-        custo_base_total = group['Custo Base Total (R$)'].sum()
-        custo_novo_total = group['Novo Custo Total (R$)'].sum()
-        
-        t_base_proj = group['Tarifa Base Destino (R$)'].iloc[0] if vol_total > 0 else 0
-        t_final_proj = group['Tarifa Nova Projetada (R$)'].iloc[0] if vol_total > 0 else 0
-        ajuste_pct = group['Ajuste Comercial (%)'].iloc[0]
-        
-        row_tar['Volume Projetado'] = vol_total
-        row_tar['Tarifa Base Projetada'] = t_base_proj
-        row_tar['Ajuste Comercial (%)'] = ajuste_pct
-        row_tar['Tarifa Final Projetada'] = t_final_proj
-        
-        row_tck['Volume Projetado'] = vol_total
-        row_tck['Ticket Base Projetado'] = custo_base_total / vol_total if vol_total > 0 else 0
-        row_tck['Ajuste Comercial (%)'] = ajuste_pct
-        row_tck['Ticket Final Projetado'] = custo_novo_total / vol_total if vol_total > 0 else 0
-        
-        for rc in rc_list:
-            rc_data = group[group[col_id] == rc]
-            if not rc_data.empty:
-                vol = rc_data['Pacotes (30 dias)'].sum()
-                c_antigo = rc_data['Custo Antigo Total (R$)'].sum()
-                c_base = rc_data['Custo Base Total (R$)'].sum()
-                c_novo = rc_data['Novo Custo Total (R$)'].sum()
-                
-                t_antiga = rc_data['Tarifa Antiga (R$)'].iloc[0]
-                tck_antigo = c_antigo / vol if vol > 0 else 0
-                
-                total_vols[rc] += vol
-                total_custo_antigo[rc] += c_antigo
-                total_custo_base[rc] += c_base
-                total_custo_novo[rc] += c_novo
-                
-                row_tar[f'Tarifa Atual ({rc})'] = t_antiga
-                row_tar[f'Volume ({rc})'] = vol
-                row_tar[f'% Var Base ({rc})'] = (t_base_proj / t_antiga - 1) if t_antiga > 0 else 0
-                row_tar[f'% Var Final ({rc})'] = (t_final_proj / t_antiga - 1) if t_antiga > 0 else 0
-                
-                row_tck[f'Ticket Atual ({rc})'] = tck_antigo
-                row_tck[f'Volume ({rc})'] = vol
-                row_tck[f'% Var Base ({rc})'] = (row_tck['Ticket Base Projetado'] / tck_antigo - 1) if tck_antigo > 0 else 0
-                row_tck[f'% Var Final ({rc})'] = (row_tck['Ticket Final Projetado'] / tck_antigo - 1) if tck_antigo > 0 else 0
-                
-            else:
-                row_tar[f'Tarifa Atual ({rc})'] = None
-                row_tar[f'Volume ({rc})'] = 0
-                row_tar[f'% Var Base ({rc})'] = None
-                row_tar[f'% Var Final ({rc})'] = None
-                
-                row_tck[f'Ticket Atual ({rc})'] = None
-                row_tck[f'Volume ({rc})'] = 0
-                row_tck[f'% Var Base ({rc})'] = None
-                row_tck[f'% Var Final ({rc})'] = None
-        
-        rows_tarifa.append(row_tar)
-        rows_ticket.append(row_tck)
-        
-    vol_total_geral = sum(total_vols.values())
-    c_base_geral = sum(total_custo_base.values())
-    c_novo_geral = sum(total_custo_novo.values())
-    
-    geral_tar = {'Região de Preço': 'Geral', 'Faixa de peso cubado (g)': 'Todas as faixas (Média Ponderada)'}
-    geral_tck = {'Região de Preço': 'Geral', 'Faixa de peso cubado (g)': 'Todas as faixas (Média Ponderada)'}
-    
-    geral_tar['Volume Projetado'] = vol_total_geral
-    geral_tar['Tarifa Base Projetada'] = c_base_geral / vol_total_geral if vol_total_geral > 0 else 0
-    geral_tar['Ajuste Comercial (%)'] = None
-    geral_tar['Tarifa Final Projetada'] = c_novo_geral / vol_total_geral if vol_total_geral > 0 else 0
-    
-    geral_tck['Volume Projetado'] = vol_total_geral
-    geral_tck['Ticket Base Projetado'] = c_base_geral / vol_total_geral if vol_total_geral > 0 else 0
-    geral_tck['Ajuste Comercial (%)'] = None
-    geral_tck['Ticket Final Projetado'] = c_novo_geral / vol_total_geral if vol_total_geral > 0 else 0
-    
-    for rc in rc_list:
-        v = total_vols[rc]
-        ca = total_custo_antigo[rc]
-        cb = total_custo_base[rc]
-        cn = total_custo_novo[rc]
-        
-        t_ant = ca / v if v > 0 else 0
-        
-        geral_tar[f'Tarifa Atual ({rc})'] = t_ant
-        geral_tar[f'Volume ({rc})'] = v
-        geral_tar[f'% Var Base ({rc})'] = (cb / ca - 1) if ca > 0 else 0
-        geral_tar[f'% Var Final ({rc})'] = (cn / ca - 1) if ca > 0 else 0
-        
-        geral_tck[f'Ticket Atual ({rc})'] = t_ant
-        geral_tck[f'Volume ({rc})'] = v
-        geral_tck[f'% Var Base ({rc})'] = (cb / ca - 1) if ca > 0 else 0
-        geral_tck[f'% Var Final ({rc})'] = (cn / ca - 1) if ca > 0 else 0
-        
-    rows_tarifa.append(geral_tar)
-    rows_ticket.append(geral_tck)
-    
-    base_cols_tar = ['Região de Preço', 'Faixa de peso cubado (g)']
-    rc_cols_tar = []
-    var_base_tar = []
-    var_final_tar = []
-    for rc in rc_list:
-        rc_cols_tar.extend([f'Tarifa Atual ({rc})', f'Volume ({rc})'])
-        var_base_tar.append(f'% Var Base ({rc})')
-        var_final_tar.append(f'% Var Final ({rc})')
-        
-    col_order_tar = base_cols_tar + rc_cols_tar + ['Tarifa Base Projetada', 'Volume Projetado'] + var_base_tar + ['Ajuste Comercial (%)', 'Tarifa Final Projetada'] + var_final_tar
-    
-    base_cols_tck = ['Região de Preço', 'Faixa de peso cubado (g)']
-    rc_cols_tck = []
-    var_base_tck = []
-    var_final_tck = []
-    for rc in rc_list:
-        rc_cols_tck.extend([f'Ticket Atual ({rc})', f'Volume ({rc})'])
-        var_base_tck.append(f'% Var Base ({rc})')
-        var_final_tck.append(f'% Var Final ({rc})')
-        
-    col_order_tck = base_cols_tck + rc_cols_tck + ['Ticket Base Projetado', 'Volume Projetado'] + var_base_tck + ['Ajuste Comercial (%)', 'Ticket Final Projetado'] + var_final_tck
-    
-    df_tarifa = pd.DataFrame(rows_tarifa)[col_order_tar]
-    df_ticket = pd.DataFrame(rows_ticket)[col_order_tck]
-    
-    has_ajuste = df_tarifa['Ajuste Comercial (%)'].abs().max() > 0 if not df_tarifa['Ajuste Comercial (%)'].isna().all() else False
-    if not has_ajuste:
-        df_tarifa = df_tarifa.drop(columns=['Ajuste Comercial (%)', 'Tarifa Final Projetada'] + var_final_tar, errors='ignore')
-        df_ticket = df_ticket.drop(columns=['Ajuste Comercial (%)', 'Ticket Final Projetado'] + var_final_tck, errors='ignore')
-        
-    return df_tarifa, df_ticket
-
-def format_df_for_display(df):
-    """Aplica máscaras visuais (Moeda, % e Milhar) no dataframe para exibição no Streamlit e PDF"""
-    df_disp = df.copy()
-    for c in df_disp.columns:
-        if "Tarifa" in c or "Ticket" in c:
-            df_disp[c] = df_disp[c].apply(lambda x: formatar_moeda(x) if pd.notna(x) else "-")
-        elif "% Var" in c or "Ajuste" in c:
-            df_disp[c] = df_disp[c].apply(lambda x: f"{x*100:+.2f}%" if pd.notna(x) else "-")
-        elif "Volume" in c:
-            df_disp[c] = df_disp[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
-    return df_disp
-
 # --- FUNÇÃO DE FORMATAÇÃO DE EXCEL (ESTILO GOOGLE SHEETS) ---
 def formatar_excel(writer):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
     font_cabecalho = Font(name='Inter', size=10, bold=True)
+    # Alinhamento 100% centralizado e sem quebra de texto (exceder)
     alinhamento = Alignment(horizontal='center', vertical='center', wrap_text=False)
     
+    # Borda fina cinza-claro (D3D3D3)
     borda_cinza = Border(
         left=Side(style='thin', color='D3D3D3'),
         right=Side(style='thin', color='D3D3D3'),
@@ -346,37 +169,60 @@ def formatar_excel(writer):
     
     for sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
-        ws.sheet_view.showGridLines = False
+        ws.sheet_view.showGridLines = False # Remove as linhas de grade da planilha
         
-        col_formats = {}
-        # Mapeia colunas buscando nas primeiras 50 linhas para pegar qualquer cabeçalho de tabela
-        for row in ws.iter_rows(min_row=1, max_row=50):
-            for cell in row:
+        col_formats_r1 = {}
+        col_formats_r5 = {}
+        
+        # Lê os formatos isoladamente para a linha 1
+        try:
+            for cell in ws[1]:
                 if cell.value and isinstance(cell.value, str):
-                    val_str = cell.value.lower()
-                    if "(R$)" in cell.value or "tarifa" in val_str or "ticket" in val_str:
-                        col_formats[cell.column_letter] = '"R$" #,##0.00'
-                    elif "(%)" in cell.value or "% var" in val_str or "ajuste" in val_str:
-                        col_formats[cell.column_letter] = '0.00%'
-                    elif "pacotes" in val_str or "volume" in val_str:
-                        col_formats[cell.column_letter] = '#,##0'
+                    val_str = cell.value
+                    if "(R$)" in val_str:
+                        col_formats_r1[cell.column_letter] = '"R$" #,##0.00'
+                    elif "(%)" in val_str:
+                        col_formats_r1[cell.column_letter] = '0.00%'
+                    elif "Pacotes" in val_str:
+                        col_formats_r1[cell.column_letter] = '#,##0'
+        except:
+            pass
 
+        # Lê os formatos isoladamente para a linha 5 (Tabela de Auditoria)
+        if ws.max_row >= 5:
+            try:
+                for cell in ws[5]:
+                    if cell.value and isinstance(cell.value, str):
+                        val_str = cell.value
+                        if "(R$)" in val_str or "Valor dentro" in val_str or "Valor fora" in val_str:
+                            col_formats_r5[cell.column_letter] = '"R$" #,##0.00'
+                        elif "(%)" in val_str:
+                            col_formats_r5[cell.column_letter] = '0.00%'
+                        elif "Pacotes" in val_str:
+                            col_formats_r5[cell.column_letter] = '#,##0'
+            except:
+                pass
+        
+        # Aplica a formatação em cada célula
         for row in ws.iter_rows():
             ws.row_dimensions[row[0].row].height = 18
+            
             for cell in row:
                 if cell.value is not None:
-                    # Aplica bold nos cabeçalhos
-                    if cell.row == 1 or (sheet_name == 'Detalhamento Impacto' and cell.row == 5) or str(cell.value) in col_formats.keys():
+                    if cell.row == 1 or (sheet_name == 'Detalhamento Impacto' and cell.row == 5):
                         cell.font = font_cabecalho
                     else:
                         cell.font = font_padrao
-                        
-                    if cell.column_letter in col_formats and type(cell.value) in [int, float]:
-                        cell.number_format = col_formats[cell.column_letter]
+                        # Formata especificamente baseado se está na tabela 1 ou 2
+                        if cell.row == 2 and cell.column_letter in col_formats_r1:
+                            cell.number_format = col_formats_r1[cell.column_letter]
+                        elif cell.row > 5 and cell.column_letter in col_formats_r5:
+                            cell.number_format = col_formats_r5[cell.column_letter]
                             
                     cell.alignment = alinhamento
                     cell.border = borda_cinza
                     
+        # Auto-ajuste de colunas baseado no maior texto
         for col in ws.columns:
             max_length = 0
             column = col[0].column_letter
@@ -391,16 +237,23 @@ def formatar_excel(writer):
                 adjusted_width = 12
             ws.column_dimensions[column].width = adjusted_width
 
+        # --- FORMATAÇÃO CONDICIONAL (SEMÁFORO DE CUSTO) ---
         if sheet_name == 'Detalhamento Impacto':
+            # Vermelho (Aumento de Custo) e Verde (Economia/Neutro)
             fill_red = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
             font_red = Font(name='Inter', size=10, color='9C0006', bold=True)
+            
             fill_green = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
             font_green = Font(name='Inter', size=10, color='006100', bold=True)
             
+            # C2 (Diferença em R$)
             ws.conditional_formatting.add('C2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
             ws.conditional_formatting.add('C2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
+            
+            # G2 (Impacto no Budget %)
             ws.conditional_formatting.add('G2', CellIsRule(operator='greaterThan', formula=['0'], stopIfTrue=True, fill=fill_red, font=font_red))
             ws.conditional_formatting.add('G2', CellIsRule(operator='lessThanOrEqual', formula=['0'], stopIfTrue=True, fill=fill_green, font=font_green))
+
 
 # --- GERADOR DE PDF (COM IDENTIDADE VISUAL LOGGI E LEBRE) ---
 def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
@@ -408,9 +261,9 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                       fat_novo, vol_fat_novo, tk_fat_novo, cresc_fat, perc_cresc,
                       loggi_antigo, vol_loggi, tk_loggi_antigo,
                       loggi_novo, tk_loggi_novo, imp_loggi, perc_imp_loggi,
-                      detalhes_reg, df_abrangencia_out, df_tabela_out, tabelas_atuais_pdf,
-                      df_var_tarifa, df_var_ticket):
+                      detalhes_reg, df_abrangencia_out, df_tabela_out, tabelas_atuais_pdf):
 
+    # Blinda a geração da data logo na primeira linha
     fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
     data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
 
@@ -420,6 +273,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     def format_perc(val):
         return f"{abs(val):.2f}%"
 
+    # --- Inserção Segura do Logo (position: fixed repete em todas as páginas no Weasyprint) ---
     logo_html = ""
     logo_path = "logo.png"
     if not os.path.exists(logo_path) and os.path.exists("logo.png.png"):
@@ -428,6 +282,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
     if os.path.exists(logo_path):
         with open(logo_path, "rb") as image_file:
             encoded_string = base64.b64encode(image_file.read()).decode()
+            # top: -20mm garante que a imagem fique 100% isolada dentro da margem superior do papel, longe das tabelas
             logo_html = f'<img src="data:image/png;base64,{encoded_string}" style="position: fixed; top: -20mm; right: 0; width: 45px; height: auto; z-index: 1000;">'
 
     html_content = f"""
@@ -438,7 +293,8 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
         <title>Relatório de Simulação - Loggi</title>
         <style>
             @page {{
-                size: A4 landscape;
+                size: A4;
+                /* Aumentamos a margem superior para 30mm para que o logo (fixed) tenha seu espaço sem tocar nas tabelas */
                 margin: 30mm 15mm 20mm 15mm;
                 background-color: #ffffff;
                 @bottom-center {{
@@ -462,8 +318,9 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 box-sizing: border-box;
             }}
             
+            /* Tipografia e Identidade Visual Loggi */
             h1 {{
-                color: #002766;
+                color: #002766; /* Loggi Dark Blue */
                 font-size: 18pt;
                 text-align: center;
                 margin-top: 10px;
@@ -473,9 +330,9 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 font-weight: 700;
             }}
             h2 {{
-                color: #006aff;
+                color: #006aff; /* Loggi Blue */
                 font-size: 13pt;
-                border-bottom: 2px solid #00baff;
+                border-bottom: 2px solid #00baff; /* Loggi Light Blue */
                 padding-bottom: 4px;
                 margin-top: 25px;
                 margin-bottom: 15px;
@@ -503,10 +360,20 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 margin-bottom: 25px;
                 box-shadow: 0 1px 3px rgba(0,0,0,0.02);
             }}
-            .context-item {{ margin-bottom: 6px; }}
-            .label {{ font-weight: bold; color: #002766; }}
+            .context-item {{
+                margin-bottom: 6px;
+            }}
+            .label {{
+                font-weight: bold;
+                color: #002766;
+            }}
 
-            .card-container {{ display: block; width: 100%; margin-bottom: 20px; page-break-inside: avoid; }}
+            .card-container {{
+                display: block;
+                width: 100%;
+                margin-bottom: 20px;
+                page-break-inside: avoid;
+            }}
             .card {{
                 background-color: #ffffff;
                 border: 1px solid #e0e0e0;
@@ -514,11 +381,29 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 padding: 15px;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.02);
             }}
-            .metric-row {{ display: block; width: 100%; margin-bottom: 8px; }}
-            .metric-label {{ display: inline-block; width: 190px; color: #555; }}
-            .metric-value {{ display: inline-block; font-weight: bold; color: #000000; }}
-            .metric-sub {{ color: #777; font-size: 8.5pt; margin-left: 10px; font-weight: normal; }}
+            .metric-row {{
+                display: block;
+                width: 100%;
+                margin-bottom: 8px;
+            }}
+            .metric-label {{
+                display: inline-block;
+                width: 190px;
+                color: #555;
+            }}
+            .metric-value {{
+                display: inline-block;
+                font-weight: bold;
+                color: #000000;
+            }}
+            .metric-sub {{
+                color: #777;
+                font-size: 8.5pt;
+                margin-left: 10px;
+                font-weight: normal;
+            }}
             
+            /* Indicadores com Cores Loggi */
             .arrow-up-green {{ color: #09ab3b; font-weight: bold; }}
             .arrow-down-green {{ color: #09ab3b; font-weight: bold; }}
             .arrow-up-red {{ color: #ff4b4b; font-weight: bold; }}
@@ -551,25 +436,29 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
                 border-collapse: collapse;
                 margin-bottom: 20px;
                 background-color: #ffffff;
-                font-size: 8pt;
+                font-size: 8.5pt;
             }}
             th {{
                 background-color: #002766;
                 color: #ffffff;
                 font-weight: bold;
                 text-align: center;
-                padding: 6px 4px;
+                padding: 8px 5px;
                 border: 1px solid #002766;
             }}
             td {{
-                padding: 5px 4px;
+                padding: 6px 5px;
                 border: 1px solid #e0e0e0;
                 text-align: center;
                 color: #333333;
             }}
-            tr:nth-child(even) {{ background-color: #f4f8fb; }}
+            tr:nth-child(even) {{
+                background-color: #f4f8fb;
+            }}
             
-            .page-break {{ page-break-before: always; }}
+            .page-break {{
+                page-break-before: always;
+            }}
         </style>
     </head>
     <body>
@@ -602,6 +491,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
             return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">(-{format_perc(val)})</span>'
         return f'<span class="arrow-neutral">(0.00%)</span>'
 
+    # --- 1. Parceiro ---
     html_content += f"""
         <h2>1. VISÃO DO PARCEIRO (Faturamento do Leve)</h2>
         <div class="card-container">
@@ -624,6 +514,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
         </div>
     """
 
+    # --- 2. Loggi ---
     html_content += f"""
         <h2>2. VISÃO LOGGI (Impacto Financeiro Real)</h2>
         <div class="card-container">
@@ -646,6 +537,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
         </div>
     """
 
+    # --- 3. Detalhamento ---
     html_content += """<h2>3. DETALHAMENTO POR REGIÃO</h2>"""
     
     if detalhes_reg:
@@ -688,44 +580,33 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str,
             html += f"<th>{col}</th>"
         html += "</tr></thead><tbody>"
         for _, row in df.iterrows():
-            # Bold for 'Geral' row
-            bold_style = ' style="font-weight:bold; background-color:#eef4fc;"' if str(row.iloc[0]).lower() == 'geral' else ''
-            html += f"<tr{bold_style}>"
+            html += "<tr>"
             for val in row:
                 html += f"<td>{val}</td>"
             html += "</tr>"
         html += "</tbody></table>"
         return html
 
+    # --- 4. Abrangencia ---
     html_content += f"""
         <div class="page-break"></div>
-        <h2>4. ANÁLISE DE VARIAÇÃO (TARIFAS)</h2>
-    """
-    html_content += generate_html_table(format_df_for_display(df_var_tarifa))
-
-    html_content += f"""
-        <div class="page-break"></div>
-        <h2>5. ANÁLISE DE VARIAÇÃO (TICKETS MÉDIOS)</h2>
-    """
-    html_content += generate_html_table(format_df_for_display(df_var_ticket))
-
-    html_content += f"""
-        <div class="page-break"></div>
-        <h2>6. ABRANGÊNCIA COMPLETA PROJETADA: {nome_destino}</h2>
+        <h2>4. ABRANGÊNCIA COMPLETA PROJETADA: {nome_destino}</h2>
     """
     colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
     html_content += generate_html_table(df_abrangencia_out[colunas_abr_pdf])
 
+    # --- 5. Tabela Frete ---
     html_content += f"""
         <div class="page-break"></div>
-        <h2>7. TABELA FRETE PESO PROJETADA: {nome_destino}</h2>
+        <h2>5. TABELA FRETE PESO PROJETADA: {nome_destino}</h2>
     """
     html_content += generate_html_table(df_tabela_out)
 
+    # --- 6. Tabelas Atuais ---
     if tabelas_atuais_pdf:
         html_content += f"""
             <div class="page-break"></div>
-            <h2>8. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>
+            <h2>6. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>
         """
         for leve_nome, df_tab in tabelas_atuais_pdf.items():
             html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
@@ -753,11 +634,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_slos = load_data(file_slos)
             df_volume = load_data(file_volume)
             
+            # --- Aplica a padronização blindada contra formatos do Looker ---
             df_frete = padronizar_colunas_frete(df_frete)
             df_abrangencia = padronizar_colunas_abrangencia(df_abrangencia)
             df_slos = padronizar_colunas_slos(df_slos)
             df_volume = padronizar_colunas_volume(df_volume)
             
+        # VALIDAÇÃO APÓS A PADRONIZAÇÃO
         if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
             st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
             st.stop()
@@ -775,8 +658,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
             df_frete_clean = processar_frete(df_frete)
             df_slos_clean = processar_slos(df_slos)
             
+            # Garante que mapeou os nomes antes de agrupar o volume
             df_nomes_leves = processar_nomes_leves(df_volume)
             
+            # --- AGRUPAMENTO DE VOLUME (Evita duplicação de faixas para a mesma cidade) ---
             df_volume['Faixa de peso cubado (g)'] = df_volume['Faixa de peso cubado (g)'].astype(str).str.strip()
             df_volume_grouped = df_volume.groupby(
                 ['Leve', 'Cidade_Normalizada', 'Faixa de peso cubado (g)'],
@@ -1227,15 +1112,16 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
                                 df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_out
                                 
-                                # Ajuste Comercial Inteligente (Porcentagem ou R$ Cravado na Faixa 1)
                                 ajuste_tipo = st.session_state.get(f"ajuste_tipo_{regiao}", "%")
                                 ajuste_val = st.session_state.get(f"ajuste_val_{regiao}", 0.0)
                                 ajuste_perc = 0.0
                                 
                                 if ajuste_val != 0.0:
                                     if ajuste_tipo == "R$ (1ª Faixa)":
-                                        fx1_row = df_regiao_tabela[df_regiao_tabela['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
-                                        valor_atual_faixa1 = fx1_row['Valor dentro do prazo'].values[0] if not fx1_row.empty else 0
+                                        fx1_row = df_price_var_clean[df_price_var_clean['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
+                                        mult_faixa1 = fx1_row['Multiplicador'].values[0] if not fx1_row.empty else 0.83
+                                        valor_atual_faixa1 = base_on * mult_faixa1
+                                        
                                         if valor_atual_faixa1 > 0:
                                             ajuste_perc = ((ajuste_val / valor_atual_faixa1) - 1) * 100
                                         
@@ -1438,16 +1324,16 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         texto_completo_memorial = "\n".join(texto_explicativo)
                         df_auditoria_excel = pd.DataFrame(registros_auditoria)
                         
+                        # --- ORDENA O DETALHAMENTO (01 A 23) ---
                         if not df_auditoria_excel.empty:
                             df_auditoria_excel = df_auditoria_excel.sort_values(
                                 by=['Tipo', 'LMC Atual / Origem', 'Região de Preço', 'Cidade', 'Faixa de peso cubado (g)']
                             )
+                            # Reorganiza as colunas para o Routing Code ficar entre LMC e Região de Preço
                             cols_auditoria = ['Tipo', 'LMC Atual / Origem', 'Routing Code', 'Região de Preço', 'Cidade', 'Faixa de peso cubado (g)', 'Pacotes (30 dias)', 'Tarifa Antiga (R$)', 'Tarifa Base Destino (R$)', 'Ajuste Comercial (%)', 'Tarifa Nova Projetada (R$)', 'Custo Antigo Total (R$)', 'Novo Custo Total (R$)', 'Diferença (R$)']
                             df_auditoria_excel = df_auditoria_excel[[c for c in cols_auditoria if c in df_auditoria_excel.columns]]
 
-                            # --- GERADOR DE TABELAS DE VARIAÇÃO ---
-                            df_var_tarifa, df_var_ticket = generate_comparativo_tables(df_auditoria_excel)
-
+                        # --- ALERTAS DE MISROUTES / PACOTES IGNORADOS ---
                         ignorado_info = []
                         total_ignorados_geral = 0
                         leves_para_checar = set(leves_selecionados)
@@ -1472,6 +1358,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 for info in ignorado_info:
                                     st.markdown(f"- {info}")
                         
+                        # --- EXIBIÇÃO DE FATURAMENTO DO PARCEIRO ---
                         st.subheader("🤝 Visão do Parceiro (Faturamento do Leve)")
                         st.markdown("Esta visão demonstra o tamanho da operação do parceiro **antes** (sem as cidades novas) e **depois** de absorver o novo escopo.")
                         
@@ -1496,6 +1383,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                         st.divider()
 
+                        # --- EXIBIÇÃO DE IMPACTO LOGGI ---
                         st.subheader("📉 Visão Loggi (Impacto Financeiro Real)")
                         st.markdown("Esta visão compara o custo da volumetria total afetada (Destino + Origem) na **tabela antiga** versus a **tabela nova projetada**.")
                         
@@ -1529,6 +1417,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         
                         st.markdown("<br>", unsafe_allow_html=True)
 
+                        # --- DETALHAMENTO POR REGIÃO ---
                         if detalhes_regioes:
                             st.markdown("#### 🔍 Detalhamento das Regiões Afetadas")
                             st.markdown("Veja abaixo o impacto financeiro isolado para cada Região de Preço que sofreu movimentação de cidades ou reajuste comercial.")
@@ -1537,7 +1426,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 st.markdown(f"##### 📍 {reg}")
                                 ajuste_aplicado = dados.get('ajuste', 0.0)
                                 if ajuste_aplicado != 0.0:
-                                    st.markdown(f"<span style='font-size: 0.9em; color: #e67e22; font-weight: bold;'>Aviso: Ajuste Comercial Aplicado de {ajuste_aplicado:+.2f}%</span>", unsafe_allow_html=True)
+                                    st.markdown(f"<span style='font-size: 0.9em; color: #e67e22; font-weight: bold;'>⚠️ Ajuste Comercial Aplicado: {ajuste_aplicado:+.2f}%</span>", unsafe_allow_html=True)
                                 cd1, cd2, cd3 = st.columns(3)
                                 tk_r_ant = dados['custo_antigo'] / dados['vol'] if dados['vol'] > 0 else 0
                                 tk_r_nov = dados['custo_novo'] / dados['vol'] if dados['vol'] > 0 else 0
@@ -1568,15 +1457,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                         st.markdown("<br>", unsafe_allow_html=True)
                         
-                        if not df_auditoria_excel.empty:
-                            st.subheader("📊 Análise de Variação (Tarifas e Tickets)")
-                            st.markdown("##### 1. Comparativo de Tarifas por Faixa")
-                            st.dataframe(format_df_for_display(df_var_tarifa), hide_index=True, use_container_width=True)
-                            
-                            st.markdown("##### 2. Comparativo de Tickets Médios por Faixa")
-                            st.dataframe(format_df_for_display(df_var_ticket), hide_index=True, use_container_width=True)
-                            st.divider()
-
+                        # --- EXIBIÇÃO DAS TABELAS COMPLETAS ---
                         st.subheader("1. Abrangência Completa Projetada")
                         st.dataframe(df_escopo_final[colunas_finais_abrangencia], hide_index=True, use_container_width=True)
                         
@@ -1589,6 +1470,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                         st.divider()
                         
+                        # PREPARAÇÃO DE DADOS ATUAIS PARA O PDF E EXCEL
                         tabelas_atuais_pdf = {}
                         for leve in leves_selecionados:
                             df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
@@ -1642,8 +1524,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 with pd.ExcelWriter(output_det, engine='openpyxl') as writer:
                                     df_resumo.to_excel(writer, sheet_name='Detalhamento Impacto', index=False, startrow=0)
                                     df_auditoria_excel.to_excel(writer, sheet_name='Detalhamento Impacto', index=False, startrow=4)
-                                    df_var_tarifa.to_excel(writer, sheet_name='Análise de Variação', index=False, startrow=0)
-                                    df_var_ticket.to_excel(writer, sheet_name='Análise de Variação', index=False, startrow=len(df_var_tarifa)+3)
                                     formatar_excel(writer)
                                 
                                 st.download_button(
@@ -1672,7 +1552,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     custo_loggi_antigo, vol_loggi_total, tk_loggi_antigo,
                                     global_custo_novo_total, tk_loggi_novo, impacto_loggi, perc_impacto_loggi,
                                     detalhes_regioes, df_escopo_final[colunas_finais_abrangencia], df_exibicao_tabela,
-                                    tabelas_atuais_pdf, df_var_tarifa, df_var_ticket
+                                    tabelas_atuais_pdf
                                 )
                                 st.download_button(
                                     label="Baixar Relatório (PDF)",
