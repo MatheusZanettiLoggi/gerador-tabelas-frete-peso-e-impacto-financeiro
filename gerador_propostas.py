@@ -143,6 +143,12 @@ def formatar_moeda(valor):
     except:
         return valor
 
+def extrair_estado(nome_leve):
+    match = re.search(r'-\s*([A-Z]{2})\b', nome_leve)
+    if match:
+        return match.group(1)
+    return None
+
 def formatar_excel(writer):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
@@ -471,7 +477,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     with col_n3: cidade_base_destino = st.selectbox("Cidade Base do Novo Lead:", sorted(df_slos_clean[df_slos_clean['State'] == estado_lead]['Cidade'].tolist()))
     
             if nome_destino_final and cidade_base_destino:
-                with st.expander("6. Manipulação de Abrangência", expanded=True):
+                with st.expander("6. Manipulação de Abrangência (Tabela Interativa)", expanded=True):
                     config_key = f"{','.join(leves_selecionados)}_{nome_destino_final}"
                     if "mov_config_key" not in st.session_state or st.session_state.mov_config_key != config_key:
                         df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
@@ -815,15 +821,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                         st.divider()
                         
-                        # PREPARAÇÃO DE DADOS ATUAIS PARA O PDF E EXCEL
-                        tabelas_atuais_pdf = {}
-                        for leve in leves_selecionados:
-                            df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
-                            df_frete_dl.rename(columns={'label': 'Regiao de Preco', 'on time amount': 'Valor dentro do prazo', 'out of time amount': 'Valor fora do prazo'}, inplace=True)
-                            df_frete_dl['Valor dentro do prazo'] = df_frete_dl['Valor dentro do prazo'].apply(formatar_moeda)
-                            df_frete_dl['Valor fora do prazo'] = df_frete_dl['Valor fora do prazo'].apply(formatar_moeda)
-                            if not df_frete_dl.empty: tabelas_atuais_pdf[leve] = df_frete_dl[['Regiao de Preco', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']]
-                        
                         col_dw1, col_down3 = st.columns([1, 1])
                         with col_dw1:
                             st.markdown("### 📥 Download da Proposta em Excel")
@@ -850,11 +847,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("Resumo em PDF com o quadro comparativo e tabelas.")
                             
                             if HAS_PDF_GENERATOR:
-                                if not df_movidos.empty:
-                                    cidades_movimentadas_str = ", ".join(sorted(df_movidos['Cidade'].str.title().unique().tolist()))
-                                else:
-                                    cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
-
                                 pdf_data = generate_html_pdf(
                                     nome_destino_final, df_comparativo, None, 
                                     df_escopo_final[colunas_finais_abrangencia], 
