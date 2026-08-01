@@ -154,7 +154,7 @@ def processar_price_var(df_price):
     df_price.columns = ['Faixa de peso cubado (g)', 'Multiplicador']
     return df_price
 
-# --- FUNÇÕES DE FORMATAÇÃO DE EXCEL ---
+# --- FUNÇÃO DE FORMATAÇÃO DE EXCEL ---
 def formatar_excel_proposta(writer):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
@@ -196,55 +196,101 @@ def formatar_excel_proposta(writer):
 
 def formatar_excel_resumo(writer):
     workbook = writer.book
-    ws = workbook['Resumo de Cenários']
-    ws.sheet_view.showGridLines = False
-    
     font_padrao = Font(name='Inter', size=10)
     font_cabecalho = Font(name='Inter', size=10, bold=True)
     font_destaque_red = Font(name='Inter', size=10, color='9C0006', bold=True)
+    fill_red = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+    font_total = Font(name='Inter', size=10, color='FFFFFF', bold=True)
+    fill_total = PatternFill(start_color='002766', end_color='002766', fill_type='solid')
+    
     alinhamento = Alignment(horizontal='center', vertical='center', wrap_text=False)
     borda_cinza = Border(left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'), top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3'))
 
-    col_formats = {}
-    cols_red = []
-    
-    for cell in ws[1]:
-        val_str = str(cell.value).lower()
-        if "fat" in val_str or "ticket" in val_str or "tk" in val_str or "impacto" in val_str:
-            col_formats[cell.column_letter] = '"R$" #,##0.00'
-            if "impacto" in val_str: cols_red.append(cell.column_letter)
-        elif "%" in val_str or "aum" in val_str:
-            col_formats[cell.column_letter] = '0.00%'
-            cols_red.append(cell.column_letter)
-        elif "volumetria" in val_str or "volume" in val_str:
-            col_formats[cell.column_letter] = '0' # Automático
+    for sheet_name in workbook.sheetnames:
+        ws = workbook[sheet_name]
+        ws.sheet_view.showGridLines = False
 
-    for row in ws.iter_rows():
-        ws.row_dimensions[row[0].row].height = 18
-        is_header = (row[0].row == 1)
-        is_total = ("Total Geral" in str(row[0].value))
+        if sheet_name == 'Resumo de Cenários':
+            col_formats = {}
+            cols_impacto = []
+            
+            for cell in ws[1]:
+                val_str = str(cell.value).lower()
+                if "fat" in val_str or "ticket" in val_str or "tk" in val_str or "impacto" in val_str:
+                    col_formats[cell.column_letter] = '"R$" #,##0.00'
+                    if "impacto" in val_str: cols_impacto.append(cell.column_letter)
+                elif "%" in val_str or "aum" in val_str:
+                    col_formats[cell.column_letter] = '0.00%'
+                    cols_impacto.append(cell.column_letter)
+                elif "volumetria" in val_str or "volume" in val_str:
+                    col_formats[cell.column_letter] = '0' # Automático
 
-        for cell in row:
-            if is_header or is_total:
-                cell.font = font_cabecalho
-            else:
-                if cell.column_letter in cols_red: cell.font = font_destaque_red
-                else: cell.font = font_padrao
+            for row in ws.iter_rows():
+                ws.row_dimensions[row[0].row].height = 18
+                is_header = (row[0].row == 1)
+                is_total = ("Total Geral" in str(row[0].value))
 
-            if cell.column_letter in col_formats and isinstance(cell.value, (int, float)):
-                cell.number_format = col_formats[cell.column_letter]
+                for cell in row:
+                    cell.alignment = alinhamento
+                    cell.border = borda_cinza
+                    
+                    if cell.column_letter in col_formats and isinstance(cell.value, (int, float)):
+                        cell.number_format = col_formats[cell.column_letter]
 
-            cell.alignment = alinhamento
-            cell.border = borda_cinza
+                    if is_header:
+                        cell.font = font_cabecalho
+                    elif is_total:
+                        # Colunas de impacto ficam com destaque rosa/vermelho no Total Geral
+                        if cell.column_letter in cols_impacto:
+                            cell.font = font_destaque_red
+                            cell.fill = fill_red
+                        else:
+                            cell.font = font_total
+                            cell.fill = fill_total
+                    else:
+                        cell.font = font_padrao
 
-    for col in ws.columns:
-        max_length = 0
-        column = col[0].column_letter
-        for cell in col:
-            try:
-                if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
-            except: pass
-        ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
+            for col in ws.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                    except: pass
+                ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
+                
+        else:
+            # Formatação para as Abas de Detalhamento
+            col_formats = {}
+            for cell in ws[1]:
+                val_str = str(cell.value).lower()
+                if "(r$)" in val_str:
+                    col_formats[cell.column_letter] = '"R$" #,##0.00'
+                elif "(%)" in val_str:
+                    col_formats[cell.column_letter] = '0.00%'
+                elif "pacotes" in val_str:
+                    col_formats[cell.column_letter] = '#,##0'
+
+            for row in ws.iter_rows():
+                ws.row_dimensions[row[0].row].height = 18
+                for cell in row:
+                    cell.alignment = alinhamento
+                    cell.border = borda_cinza
+                    if cell.row == 1:
+                        cell.font = font_cabecalho
+                    else:
+                        cell.font = font_padrao
+                        if cell.column_letter in col_formats and isinstance(cell.value, (int, float)):
+                            cell.number_format = col_formats[cell.column_letter]
+
+            for col in ws.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                    except: pass
+                ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
 
 # --- GERADOR DE PDF ---
 def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
@@ -406,20 +452,25 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
                 </div>
                 """
 
-        html_content += f"<h3>Abrangência Completa Projetada</h3>"
+        html_content += f"<h3>Abrangência Completa Projetada ({cenario_nome})</h3>"
         colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
         html_content += generate_simple_html_table(df_abrangencia_out[colunas_abr_pdf])
 
-        html_content += f"<h3>Tabela Frete Peso Projetada</h3>"
+        html_content += f"<h3>Tabela Frete Peso Projetada ({cenario_nome})</h3>"
         df_ex = dict_tabelas_out[cenario_nome].copy()
         df_ex['Valor dentro do prazo'] = df_ex['Valor dentro do prazo'].apply(format_money)
         df_ex['Valor fora do prazo'] = df_ex['Valor fora do prazo'].apply(format_money)
         html_content += generate_simple_html_table(df_ex)
 
+    if tabelas_atuais_pdf:
+        html_content += f"""<div class="page-break"></div><h2>TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
+        for leve_nome, df_tab in tabelas_atuais_pdf.items():
+            html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
+            html_content += generate_simple_html_table(df_tab)
+
     html_content += """</body></html>"""
     pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
     return pdf_bytes
-
 
 # --- FLUXO PRINCIPAL ---
 df_price_var_raw = load_local_excel("Price variation.xlsx")
@@ -593,7 +644,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     st.session_state.df_movimentacao = df_editado
                     df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
 
-                # --- PROCESSAMENTO BASE & ESTRATÉGIA ---
+                # --- PROCESSAMENTO BASE E ESTRATÉGIA ---
                 df_abrangencia_existente = pd.DataFrame(columns=['LMC Name', 'Região de preço', 'Cidade', 'State', 'Observação'])
                 if tipo_destino == "Um Leve Existente (já selecionado)":
                     df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
@@ -613,7 +664,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 regioes_finais_destino = sorted(df_escopo_final['Região de preço'].unique().tolist())
 
-                # Calcula a tabela base (Neutra) antecipadamente
                 df_tabelas_base_list = []
                 dict_base_on = {}
                 
@@ -683,7 +733,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     tabelas_atuais_pdf = {}
                     cenario_metrics = {}
                     
-                    # CÁLCULO DE CONTEXTO (Seção 8)
                     context_data = []
                     for reg in regioes_finais_destino:
                         cidades_reg = df_escopo_final[df_escopo_final['Região de preço'] == reg]
@@ -782,15 +831,17 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         st.success(f"Cálculos finalizados para **{nome_destino_final}**!")
                         
                         resultados_cenarios = []
+                        dict_auditorias = {}
                         
                         for c_idx, cenario_nome in enumerate(cenarios_nomes):
                             cen_id = f"c{c_idx+1}"
                             lista_tabelas_regiao = []
+                            registros_auditoria = []
+                            dict_ajustes_perc = {}
                             
                             for regiao in regioes_finais_destino:
                                 cidades_mov_regiao = df_movidos[df_movidos['Região de preço'] == regiao]
                                 
-                                # Conta o volume total simulado dessa região (para o Ticket Médio)
                                 vol_regiao_total_sim = 0
                                 def count_v(cidades_df, lmc_col):
                                     v = 0
@@ -823,7 +874,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         val_fx1_atual = base_on * 0.83
                                         if val_fx1_atual > 0: ajuste_perc = ((ajuste_val / val_fx1_atual) - 1) * 100
                                     elif ajuste_tipo == "R$ (Ticket Médio)":
-                                        # Calcula fator_soma ponderado da base
                                         soma_vol_mult = 0
                                         def calc_smult(cidades_df, lmc_col):
                                             sm = 0
@@ -847,7 +897,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     fator = 1 + (ajuste_perc / 100)
                                     df_regiao_tabela['Valor dentro do prazo'] *= fator
                                     df_regiao_tabela['Valor fora do prazo'] *= fator
-                                    
+                                
+                                dict_ajustes_perc[regiao] = ajuste_perc
                                 lista_tabelas_regiao.append(df_regiao_tabela[['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']])
                             
                             df_tabela_final = pd.concat(lista_tabelas_regiao, ignore_index=True)
@@ -859,33 +910,57 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             
                             for regiao in regioes_finais_destino:
                                 cidades_mov_regiao = df_movidos[df_movidos['Região de preço'] == regiao]
-                                def calc_costs(cidades_df, lmc_col):
+                                aj_perc = dict_ajustes_perc[regiao]
+                                
+                                def calc_costs(cidades_df, lmc_col, is_migrada):
                                     v = 0; c_ant = 0; c_nov = 0
                                     tb_nova = dict_tabelas_finais[cenario_nome]
                                     for _, r in cidades_df.iterrows():
-                                        vols = df_volume[(df_volume['Leve'] == r[lmc_col]) & (df_volume['Cidade_Normalizada'] == normalize_string(r['Cidade']))]
+                                        lmc_n = r[lmc_col]
+                                        vols = df_volume[(df_volume['Leve'] == lmc_n) & (df_volume['Cidade_Normalizada'] == normalize_string(r['Cidade']))]
                                         for _, v_row in vols.iterrows():
                                             fx = v_row['Faixa de peso cubado (g)']
                                             qtd = v_row['# Total Packages']
-                                            tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == r[lmc_col]) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
-                                            preco_ant = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
-                                            tb_n = tb_nova[tb_nova['Faixa de peso cubado (g)'] == fx]
-                                            preco_nov = tb_n['Valor dentro do prazo'].values[0] if not tb_n.empty else 0
-                                            v += qtd; c_ant += qtd * preco_ant; c_nov += qtd * preco_nov
+                                            if qtd > 0:
+                                                tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == lmc_n) & (df_frete_clean['label'] == regiao) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
+                                                preco_ant = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
+                                                tb_n = tb_nova[tb_nova['Faixa de peso cubado (g)'] == fx]
+                                                preco_nov = tb_n['Valor dentro do prazo'].values[0] if not tb_n.empty else 0
+                                                v += qtd; c_ant += qtd * preco_ant; c_nov += qtd * preco_nov
+                                                
+                                                t_equiv = preco_nov / (1 + (aj_perc/100)) if aj_perc != 0 else preco_nov
+                                                tipo_str = 'Cidades Migradas (Origem)' if is_migrada else 'Cidades Atuais do Destino'
+                                                
+                                                registros_auditoria.append({
+                                                    'Tipo': tipo_str,
+                                                    'LMC Atual / Origem': lmc_n,
+                                                    'Routing Code': mapa_routing.get(lmc_n, "-"),
+                                                    'Região de Preço': regiao,
+                                                    'Cidade': str(r['Cidade']).title(),
+                                                    'Faixa de peso cubado (g)': fx,
+                                                    'Pacotes (30 dias)': qtd,
+                                                    'Tarifa Antiga (R$)': preco_ant,
+                                                    'Tarifa base equivalente Destino (R$)': t_equiv,
+                                                    'Ajuste Comercial (%)': aj_perc / 100,
+                                                    'Tarifa Nova Projetada (R$)': preco_nov,
+                                                    'Custo Antigo Total (R$)': qtd * preco_ant,
+                                                    'Novo Custo Total (R$)': qtd * preco_nov,
+                                                    'Diferença (R$)': (qtd * preco_nov) - (qtd * preco_ant)
+                                                })
                                     return v, c_ant, c_nov
                                 
-                                v_m, c_a_m, c_n_m = calc_costs(cidades_mov_regiao, 'LMC Name')
+                                v_m, c_a_m, c_n_m = calc_costs(cidades_mov_regiao, 'LMC Name', True)
                                 g_vol_migr += v_m; g_custo_migr += c_a_m; g_custo_novo += c_n_m
                                 reg_vol = v_m; reg_c_antigo = c_a_m; reg_c_novo = c_n_m
                                 
                                 if tipo_destino == "Um Leve Existente (já selecionado)":
                                     cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
                                     cidades_exist['LMC Dummy'] = nome_destino_final
-                                    v_d, c_a_d, c_n_d = calc_costs(cidades_exist, 'LMC Dummy')
+                                    v_d, c_a_d, c_n_d = calc_costs(cidades_exist, 'LMC Dummy', False)
                                     g_vol_dest += v_d; g_custo_dest += c_a_d; g_custo_novo += c_n_d
                                     reg_vol += v_d; reg_c_antigo += c_a_d; reg_c_novo += c_n_d
                                 
-                                detalhes_regioes_indiv[regiao] = {'vol': reg_vol, 'custo_antigo': reg_c_antigo, 'custo_novo': reg_c_novo, 'ajuste': st.session_state.get(f"val_{cen_id}_{regiao}", 0.0)}
+                                detalhes_regioes_indiv[regiao] = {'vol': reg_vol, 'custo_antigo': reg_c_antigo, 'custo_novo': reg_c_novo, 'ajuste': aj_perc}
 
                                 resultados_cenarios.append({
                                     "Cenário": cenario_nome,
@@ -899,6 +974,13 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     "% Aumento": (reg_c_novo / reg_c_antigo - 1) if reg_c_antigo > 0 else 0
                                 })
                             
+                            df_aud = pd.DataFrame(registros_auditoria)
+                            if not df_aud.empty:
+                                cols_auditoria = ['Tipo', 'LMC Atual / Origem', 'Routing Code', 'Região de Preço', 'Cidade', 'Faixa de peso cubado (g)', 'Pacotes (30 dias)', 'Tarifa Antiga (R$)', 'Tarifa base equivalente Destino (R$)', 'Ajuste Comercial (%)', 'Tarifa Nova Projetada (R$)', 'Custo Antigo Total (R$)', 'Novo Custo Total (R$)', 'Diferença (R$)']
+                                df_aud = df_aud.sort_values(by=['Tipo', 'LMC Atual / Origem', 'Região de Preço', 'Cidade', 'Faixa de peso cubado (g)'])
+                                df_aud = df_aud[[c for c in cols_auditoria if c in df_aud.columns]]
+                            dict_auditorias[cenario_nome] = df_aud
+
                             fat_atual_total = g_custo_dest + g_custo_migr
                             vol_total_cenario = g_vol_dest + g_vol_migr
                             fat_simulado_total = g_custo_novo
@@ -1016,6 +1098,9 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 for idx in df.index:
                                     if df.loc[idx, 'Região de Preço'] == 'Total Geral':
                                         styles.loc[idx, :] = 'background-color: #002766 !important; color: #ffffff !important; font-weight: bold; text-align: center;'
+                                        for col in df.columns:
+                                            if "Impacto" in col or "% Aum" in col:
+                                                styles.loc[idx, col] = 'background-color: #ffc7ce !important; color: #9c0006 !important; font-weight: bold; text-align: center;'
                                 return styles
                                 
                             styled_df = df_disp.style.apply(get_styles, axis=None)
@@ -1122,10 +1207,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         col_dl_res, col_dl_pdf = st.columns(2)
                         with col_dl_res:
                             st.markdown("### 📊 Relatório Gerencial (Excel)")
-                            st.markdown("Planilha contendo o Quadro Resumo de todos os cenários.")
+                            st.markdown("Planilha contendo o Quadro Resumo de todos os cenários e suas respectivas auditorias de cálculo.")
                             output_res = io.BytesIO()
                             with pd.ExcelWriter(output_res, engine='openpyxl') as writer:
                                 df_comparativo.to_excel(writer, sheet_name='Resumo de Cenários', index=False)
+                                for cen_name, df_aud in dict_auditorias.items():
+                                    if not df_aud.empty:
+                                        sn = f"Detalhes {cen_name}"[:31]
+                                        df_aud.to_excel(writer, sheet_name=sn, index=False)
                                 formatar_excel_resumo(writer)
                             
                             st.download_button(
