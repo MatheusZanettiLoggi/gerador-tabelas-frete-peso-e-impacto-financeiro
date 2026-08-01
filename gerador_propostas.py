@@ -240,7 +240,6 @@ def formatar_excel_resumo(writer):
                     if is_header:
                         cell.font = font_cabecalho
                     elif is_total:
-                        # Colunas de impacto ficam com destaque rosa/vermelho no Total Geral
                         if cell.column_letter in cols_impacto:
                             cell.font = font_destaque_red
                             cell.fill = fill_red
@@ -260,7 +259,6 @@ def formatar_excel_resumo(writer):
                 ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
                 
         else:
-            # Formatação para as Abas de Detalhamento
             col_formats = {}
             for cell in ws[1]:
                 val_str = str(cell.value).lower()
@@ -350,7 +348,6 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
             th {{ background-color: #002766; color: #fff; font-weight: bold; padding: 6px 4px; border: 1px solid #002766; }}
             td {{ padding: 5px 4px; border: 1px solid #e0e0e0; color: #333; }}
             tr:nth-child(even) {{ background-color: #f4f8fb; }}
-            .highlight-row td {{ background-color: #002766 !important; color: #ffffff !important; font-weight: bold !important; }}
             .page-break {{ page-break-before: always; }}
             .cenario-header {{ background-color: #eef4fc; border-left: 4px solid #006aff; padding: 10px; margin-top: 15px; margin-bottom: 10px; font-weight: bold; color: #002766; }}
         </style>
@@ -365,7 +362,9 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
     html_content += f"""<h2>1. RESUMO COMPARATIVO DE CENÁRIOS</h2>"""
     df_resumo_html = df_comparativo.copy()
     for c in df_resumo_html.columns:
-        if "Fat" in c or "Ticket" in c or "TK" in c or "Impacto" in c: df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_money(x) if pd.notna(x) and isinstance(x, (int, float)) else x)
+        if "Fat" in c or "Ticket" in c or "TK" in c or "Impacto" in c or "Atual" in c:
+            if c != 'Região de Preço' and c != 'Volumetria' and "%" not in c:
+                df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_money(x) if pd.notna(x) and isinstance(x, (int, float)) else x)
         elif "%" in c or "Aum" in c: df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_perc(x * 100) if pd.notna(x) and isinstance(x, (int, float)) else x)
         elif "Vol" in c: df_resumo_html[c] = df_resumo_html[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
 
@@ -375,20 +374,30 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
         for col in df.columns: html += f"<th>{col}</th>"
         html += "</tr></thead><tbody>"
         for _, row in df.iterrows():
-            if str(row.iloc[0]).lower() == 'total geral':
-                html += f"<tr class='highlight-row'>"
-                for val in row: html += f"<td>{val}</td>"
-                html += "</tr>"
-            else:
-                html += "<tr>"
-                for col_idx, val in enumerate(row):
-                    col_name = df.columns[col_idx]
-                    bg_color = ""
-                    for i, cen in enumerate(cenarios_nomes):
-                        if cen in col_name or f"Cenário {i+1}" in col_name:
-                            bg_color = f" background-color: {CORES_CENARIOS[i % len(CORES_CENARIOS)]};"
-                    html += f"<td style='{bg_color}'>{val}</td>"
-                html += "</tr>"
+            is_total = str(row.iloc[0]).lower() == 'total geral'
+            html += "<tr>"
+            for col_idx, val in enumerate(row):
+                col_name = df.columns[col_idx]
+                bg_color = ""
+                text_color = "#333333"
+                font_weight = "normal"
+                
+                for i, cen in enumerate(cenarios_nomes):
+                    if cen in col_name or f"Cenário {i+1}" in col_name:
+                        bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                
+                if is_total:
+                    font_weight = "bold"
+                    if "Impacto" in col_name or "% Aum" in col_name:
+                        bg_color = "#ffc7ce"
+                        text_color = "#9c0006"
+                    else:
+                        bg_color = "#002766"
+                        text_color = "#ffffff"
+                        
+                style_str = f"background-color: {bg_color}; color: {text_color}; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color};"
+                html += f"<td style='{style_str}'>{val}</td>"
+            html += "</tr>"
         html += "</tbody></table>"
         return html
 
@@ -463,7 +472,7 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
         html_content += generate_simple_html_table(df_ex)
 
     if tabelas_atuais_pdf:
-        html_content += f"""<div class="page-break"></div><h2>TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
+        html_content += f"""<div class="page-break"></div><h2>3. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
         for leve_nome, df_tab in tabelas_atuais_pdf.items():
             html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
             html_content += generate_simple_html_table(df_tab)
@@ -471,6 +480,7 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
     html_content += """</body></html>"""
     pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
     return pdf_bytes
+
 
 # --- FLUXO PRINCIPAL ---
 df_price_var_raw = load_local_excel("Price variation.xlsx")
@@ -1085,26 +1095,48 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 elif "Vol" in c:
                                     df_disp[c] = df_disp[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
                             
-                            def get_styles(df):
-                                styles = pd.DataFrame('', index=df.index, columns=df.columns)
-                                for col in df.columns:
+                            # Tabela HTML Customizada para não ser sobreescrita pelo modo Escuro do Streamlit
+                            html_table = f"""
+                            <style>
+                                .custom-summary-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; font-family: 'Inter', sans-serif; font-size: 14px; background-color: white; }}
+                                .custom-summary-table th {{ background-color: #002766; color: #ffffff; font-weight: bold; text-align: center; padding: 10px 5px; border: 1px solid #e0e0e0; }}
+                                .custom-summary-table td {{ padding: 8px 5px; border: 1px solid #e0e0e0; text-align: center; }}
+                            </style>
+                            <table class="custom-summary-table"><thead><tr>
+                            """
+                            for col in df_disp.columns:
+                                html_table += f"<th>{col}</th>"
+                            html_table += "</tr></thead><tbody>"
+                            
+                            for _, row in df_disp.iterrows():
+                                is_total = str(row.iloc[0]).lower() == 'total geral'
+                                html_table += "<tr>"
+                                
+                                for col_idx, val in enumerate(row):
+                                    col_name = df_disp.columns[col_idx]
+                                    bg_color = ""
+                                    text_color = "#333333"
+                                    font_weight = "normal"
+                                    
                                     for i, cen in enumerate(cenarios_nomes):
-                                        if cen in col or f"Cenário {i+1}" in col:
-                                            styles[col] = f'background-color: {CORES_CENARIOS[i % len(CORES_CENARIOS)]}; color: #333333; text-align: center;'
-                                            break
-                                    else:
-                                        styles[col] = 'text-align: center;'
-                                
-                                for idx in df.index:
-                                    if df.loc[idx, 'Região de Preço'] == 'Total Geral':
-                                        styles.loc[idx, :] = 'background-color: #002766 !important; color: #ffffff !important; font-weight: bold; text-align: center;'
-                                        for col in df.columns:
-                                            if "Impacto" in col or "% Aum" in col:
-                                                styles.loc[idx, col] = 'background-color: #ffc7ce !important; color: #9c0006 !important; font-weight: bold; text-align: center;'
-                                return styles
-                                
-                            styled_df = df_disp.style.apply(get_styles, axis=None)
-                            st.dataframe(styled_df, hide_index=True, use_container_width=True)
+                                        if cen in col_name or f"Cenário {i+1}" in col_name:
+                                            bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                                    
+                                    if is_total:
+                                        font_weight = "bold"
+                                        if "Impacto" in col_name or "% Aum" in col_name:
+                                            bg_color = "#ffc7ce"
+                                            text_color = "#9c0006"
+                                        else:
+                                            bg_color = "#002766"
+                                            text_color = "#ffffff"
+                                            
+                                    style_str = f"background-color: {bg_color}; color: {text_color}; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color};"
+                                    html_table += f"<td style='{style_str}'>{val}</td>"
+                                html_table += "</tr>"
+                            html_table += "</tbody></table>"
+                            
+                            st.markdown(html_table, unsafe_allow_html=True)
 
                         for idx, cen in enumerate(cenarios_nomes):
                             with tabs_res[idx+1]:
@@ -1230,11 +1262,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("Apresentação completa com resumo e impacto de cada cenário.")
                             
                             if HAS_PDF_GENERATOR:
-                                if not df_movidos.empty:
-                                    cidades_movimentadas_str = ", ".join(sorted(df_movidos['Cidade'].str.title().unique().tolist()))
-                                else:
-                                    cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
-
                                 pdf_data = generate_html_pdf(
                                     nome_destino_final, df_comparativo, cenario_metrics, 
                                     df_escopo_final[colunas_finais_abrangencia], 
