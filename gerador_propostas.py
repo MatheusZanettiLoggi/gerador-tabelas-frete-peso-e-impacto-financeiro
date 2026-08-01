@@ -48,7 +48,7 @@ st.sidebar.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvid
 if "num_cenarios" not in st.session_state:
     st.session_state["num_cenarios"] = 1
 
-# Cores pastéis para organizar os cenários visualmente (C1, C2, C3, C4...)
+# Cores pastéis para organizar os cenários visualmente
 CORES_CENARIOS = ['#e6f2ff', '#e6ffe6', '#fff2e6', '#f2e6ff', '#ffe6e6']
 
 # --- FUNÇÕES DE TRATAMENTO E PADRONIZAÇÃO DE DADOS ---
@@ -211,7 +211,6 @@ def formatar_excel(writer):
             adjusted_width = (max_length + 2) * 1.15
             if adjusted_width < 12: adjusted_width = 12
             ws.column_dimensions[column].width = adjusted_width
-
 
 # --- GERADOR DE PDF ---
 def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
@@ -399,7 +398,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
                 </div>
                 """
 
-        # Tabelas dentro do cenário
         html_content += f"<h3>Abrangência Completa Projetada ({cenario_nome})</h3>"
         colunas_abr_pdf = [c for c in df_abrangencia_out.columns if c != 'State']
         html_content += generate_simple_html_table(df_abrangencia_out[colunas_abr_pdf])
@@ -409,9 +407,10 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
         df_ex['Valor dentro do prazo'] = df_ex['Valor dentro do prazo'].apply(format_money)
         df_ex['Valor fora do prazo'] = df_ex['Valor fora do prazo'].apply(format_money)
         html_content += generate_simple_html_table(df_ex)
+        html_content += f"""<div class="page-break"></div>"""
 
     if tabelas_atuais_pdf:
-        html_content += f"""<div class="page-break"></div><h2>3. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
+        html_content += f"""<h2>3. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
         for leve_nome, df_tab in tabelas_atuais_pdf.items():
             html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
             html_content += generate_simple_html_table(df_tab)
@@ -559,10 +558,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
                     st.markdown("⚡ **Ações em Massa**")
                     col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns([2.5, 2.5, 2.5, 1.5, 1.5])
-                    with col_m1: bulk_lmc = st.selectbox("1. Filtrar Origem:", ["Selecione..."] + leves_selecionados, key="bulk_lmc")
+                    with col_m1: bulk_lmc = st.selectbox("1. Filtrar Origem:", ["Selecione...", "Todos os Leves"] + leves_selecionados, key="bulk_lmc")
                     with col_m2:
                         opcoes_reg = ["Todas as Regiões"]
-                        if bulk_lmc != "Selecione...": opcoes_reg += sorted(list(st.session_state.df_movimentacao[st.session_state.df_movimentacao['LMC Name'] == bulk_lmc]['Região de preço'].unique()))
+                        if bulk_lmc != "Selecione...":
+                            if bulk_lmc == "Todos os Leves":
+                                opcoes_reg += sorted(list(st.session_state.df_movimentacao['Região de preço'].unique()))
+                            else:
+                                opcoes_reg += sorted(list(st.session_state.df_movimentacao[st.session_state.df_movimentacao['LMC Name'] == bulk_lmc]['Região de preço'].unique()))
                         bulk_reg = st.selectbox("2. Filtrar Região:", opcoes_reg, key="bulk_reg")
                     with col_m3: bulk_dest = st.selectbox("3. Escolher Destino:", opcoes_destino, key="bulk_dest")
                     with col_m4:
@@ -570,7 +573,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         def aplicar_em_massa():
                             l, r, d = st.session_state.bulk_lmc, st.session_state.bulk_reg, st.session_state.bulk_dest
                             if l != "Selecione...":
-                                mask = st.session_state.df_movimentacao['LMC Name'] == l
+                                if l == "Todos os Leves":
+                                    mask = pd.Series([True]*len(st.session_state.df_movimentacao), index=st.session_state.df_movimentacao.index)
+                                else:
+                                    mask = st.session_state.df_movimentacao['LMC Name'] == l
                                 if r != "Todas as Regiões": mask &= st.session_state.df_movimentacao['Região de preço'] == r
                                 st.session_state.df_movimentacao.loc[mask, 'Destino'] = d
                         st.button("Aplicar Ação", on_click=aplicar_em_massa, use_container_width=True)
@@ -586,29 +592,23 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     st.session_state.df_movimentacao = df_editado
                     df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
 
-                with st.expander("7. Estratégia de Precificação", expanded=True):
+                with st.expander("7. Tabela Base Calculada", expanded=True):
                     pode_prosseguir = False
-                    estrategia_preco = None
-                    tabela_base_selecionada = None
+                    estrategia_preco = "Tabela Equivalente (Média Ponderada)"
                     if df_movidos.empty and tipo_destino == "Um Novo Lead":
                         st.warning("Nenhum município foi movimentado para o Novo Lead ainda.")
                     elif df_movidos.empty and tipo_destino == "Um Leve Existente (já selecionado)":
-                        st.info("💡 **Modo de Reajuste Comercial**")
-                        estrategia_preco = "Reajuste da Tabela Atual (Sem movimentação)"
-                        tabela_base_selecionada = nome_destino_final
+                        st.info("💡 **Modo de Reajuste Comercial:** Nenhuma cidade foi movimentada. O simulador manterá a abrangência e tabela atuais do Leve como base neutra para simulações de ajustes no Passo 8.")
                         pode_prosseguir = True
                     else:
-                        estrategia_preco = st.radio("Estratégia:", ["Gerar Tabela Equivalente (Focada em manter Impacto Neutro)", "Utilizar uma Tabela Existente (Manter tabela do destino atual)"])
-                        if estrategia_preco == "Utilizar uma Tabela Existente (Manter tabela do destino atual)":
-                            if tipo_destino == "Um Leve Existente (já selecionado)":
-                                tabela_base_selecionada = nome_destino_final
-                            else:
-                                nome_base_display = st.selectbox("Qual tabela atual usar como base?", leves_selecionados_formatados)
-                                tabela_base_selecionada = mapa_nomes.get(nome_base_display)
+                        st.info("💡 **Geração Automática de Tabela Base:** O sistema calculará uma tabela equivalente neutra (média ponderada) consolidando as volumetrias das origens envolvidas. Você poderá aplicar reajustes no próximo passo.")
                         pode_prosseguir = True
                 
-                # --- PROCESSAMENTO ---
+                # --- PROCESSAMENTO DOS RESULTADOS ---
                 if pode_prosseguir:
+                    dict_tabelas_finais = {}
+                    tabelas_atuais_pdf = {}
+                    cenario_metrics = {}
                     
                     if tipo_destino == "Um Leve Existente (já selecionado)":
                         df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
@@ -669,11 +669,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         else:
                             st.info("Nenhuma volumetria recente encontrada para as cidades selecionadas.")
                             
-                        # Cabeçalho e Botão alinhados horizontalmente com colunas
-                        c_head, c_btn1, c_btn2 = st.columns([5, 1.5, 0.2])
+                        c_head, c_btn = st.columns([5, 1.5])
                         with c_head:
                             st.markdown("### 🎛️ Configuração de Cenários")
-                        with c_btn1:
+                        with c_btn:
                             st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
                             if st.button("➕ Novo Cenário", use_container_width=True):
                                 st.session_state["num_cenarios"] += 1
@@ -730,8 +729,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         st.success(f"Cálculos finalizados para **{nome_destino_final}**!")
                         
                         resultados_cenarios = []
-                        cenario_metrics = {}
-                        dict_tabelas_finais = {}
                         
                         for c_idx, cenario_nome in enumerate(cenarios_nomes):
                             cen_id = f"c{c_idx+1}"
@@ -768,30 +765,33 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             s_mult += qtd * mult_dict.get(fx, 1.0)
                                     return v, c_on, s_mult, c_atual
 
-                                if regiao in df_movidos['Região de preço'].unique() and estrategia_preco == "Gerar Tabela Equivalente (Focada em manter Impacto Neutro)":
-                                    v1, co1, sm1, ca1 = calc_base_vol(cidades_mov_regiao, 'LMC Name')
-                                    vol_regiao += v1; custo_alvo_on += co1; soma_vol_mult += sm1; custo_atual_regiao += ca1
+                                v1, co1, sm1, ca1 = calc_base_vol(cidades_mov_regiao, 'LMC Name')
+                                vol_regiao += v1; custo_alvo_on += co1; soma_vol_mult += sm1; custo_atual_regiao += ca1
+                                
+                                if tipo_destino == "Um Leve Existente (já selecionado)":
+                                    cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
+                                    cidades_exist['LMC Dummy'] = nome_destino_final
+                                    v2, co2, sm2, ca2 = calc_base_vol(cidades_exist, 'LMC Dummy')
+                                    vol_regiao += v2; custo_alvo_on += co2; soma_vol_mult += sm2; custo_atual_regiao += ca2
                                     
-                                    if tipo_destino == "Um Leve Existente (já selecionado)":
-                                        cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
-                                        cidades_exist['LMC Dummy'] = nome_destino_final
-                                        v2, co2, sm2, ca2 = calc_base_vol(cidades_exist, 'LMC Dummy')
-                                        vol_regiao += v2; custo_alvo_on += co2; soma_vol_mult += sm2; custo_atual_regiao += ca2
-                                        
-                                    base_on = custo_alvo_on / soma_vol_mult if soma_vol_mult > 0 else 0
+                                if soma_vol_mult > 0:
+                                    base_on = custo_alvo_on / soma_vol_mult
                                 else:
-                                    frete_base = df_frete_clean[(df_frete_clean['LMC name'] == tabela_base_selecionada) & (df_frete_clean['label'] == regiao)]
-                                    faixa1_base = frete_base[frete_base['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
-                                    nova_faixa1_on = faixa1_base['on time amount'].values[0] if not faixa1_base.empty else 0
-                                    base_on = nova_faixa1_on / 0.83
-                                    
-                                    v1, co1, sm1, ca1 = calc_base_vol(cidades_mov_regiao, 'LMC Name')
-                                    vol_regiao += v1; custo_atual_regiao += ca1; soma_vol_mult += sm1
+                                    faixas1_on = []
+                                    if not cidades_mov_regiao.empty:
+                                        for lmc in cidades_mov_regiao['LMC Name'].unique():
+                                            tb = df_frete_clean[(df_frete_clean['LMC name'] == lmc) & (df_frete_clean['label'] == regiao)]
+                                            fx1 = tb[tb['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
+                                            if not fx1.empty: faixas1_on.append(fx1['on time amount'].values[0])
                                     if tipo_destino == "Um Leve Existente (já selecionado)":
-                                        cidades_exist = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == regiao]
-                                        cidades_exist['LMC Dummy'] = nome_destino_final
-                                        v2, co2, sm2, ca2 = calc_base_vol(cidades_exist, 'LMC Dummy')
-                                        vol_regiao += v2; custo_atual_regiao += ca2; soma_vol_mult += sm2
+                                        tb = df_frete_clean[(df_frete_clean['LMC name'] == nome_destino_final) & (df_frete_clean['label'] == regiao)]
+                                        fx1 = tb[tb['Faixa de peso cubado (g)'].str.contains('01 0 to 300', na=False, case=False)]
+                                        if not fx1.empty: faixas1_on.append(fx1['on time amount'].values[0])
+                                    
+                                    if faixas1_on:
+                                        base_on = (sum(faixas1_on) / len(faixas1_on)) / 0.83
+                                    else:
+                                        base_on = 0
 
                                 df_regiao_tabela = df_price_var_clean.copy()
                                 df_regiao_tabela['Região de Preço'] = regiao
@@ -994,7 +994,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 
                                 for idx in df.index:
                                     if df.loc[idx, 'Região de Preço'] == 'Total Geral':
-                                        styles.loc[idx, :] = 'background-color: #002766; color: white; font-weight: bold; text-align: center;'
+                                        styles.loc[idx, :] = 'background-color: #002766 !important; color: white !important; font-weight: bold; text-align: center;'
                                 return styles
                                 
                             styled_df = df_disp.style.apply(get_styles, axis=None)
