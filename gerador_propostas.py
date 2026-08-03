@@ -152,6 +152,8 @@ def processar_nomes_leves(df_volume):
 @st.cache_data
 def processar_price_var(df_price):
     df_price.columns = ['Faixa de peso cubado (g)', 'Multiplicador']
+    # Extrai código numérico da faixa para blindar cruzamentos
+    df_price['Cod'] = df_price['Faixa de peso cubado (g)'].astype(str).str.strip().str[:2]
     return df_price
 
 # --- FUNÇÃO DE FORMATAÇÃO DE EXCEL ---
@@ -216,7 +218,7 @@ def formatar_excel_resumo(writer):
             
             for cell in ws[1]:
                 val_str = str(cell.value).lower()
-                if "fat" in val_str or "ticket" in val_str or "tk" in val_str or "impacto" in val_str:
+                if "fat" in val_str or "ticket" in val_str or "tk" in val_str or "impacto" in val_str or "atual" in val_str:
                     col_formats[cell.column_letter] = '"R$" #,##0.00'
                     if "impacto" in val_str: cols_impacto.append(cell.column_letter)
                 elif "%" in val_str or "aum" in val_str:
@@ -240,6 +242,7 @@ def formatar_excel_resumo(writer):
                     if is_header:
                         cell.font = font_cabecalho
                     elif is_total:
+                        # Aplica fundo rosa/texto vermelho nos impactos da linha de total
                         if cell.column_letter in cols_impacto:
                             cell.font = font_destaque_red
                             cell.fill = fill_red
@@ -258,11 +261,11 @@ def formatar_excel_resumo(writer):
                     except: pass
                 ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
                 
-        else:
+        else: # Abas de Auditoria de Detalhes
             col_formats = {}
             for cell in ws[1]:
                 val_str = str(cell.value).lower()
-                if "(r$)" in val_str:
+                if "(r$)" in val_str or "tarifa" in val_str or "custo" in val_str or "diferença" in val_str:
                     col_formats[cell.column_letter] = '"R$" #,##0.00'
                 elif "(%)" in val_str:
                     col_formats[cell.column_letter] = '0.00%'
@@ -291,7 +294,7 @@ def formatar_excel_resumo(writer):
                 ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
 
 # --- GERADOR DE PDF ---
-def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
+def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
     fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
     data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
 
@@ -358,7 +361,6 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
         <div class="header-meta">Gerado em: {data_extracao} | Lead/Destino: {nome_destino}</div>
     """
 
-    # --- 1. RESUMO GERAL ---
     html_content += f"""<h2>1. RESUMO COMPARATIVO DE CENÁRIOS</h2>"""
     df_resumo_html = df_comparativo.copy()
     for c in df_resumo_html.columns:
@@ -470,9 +472,10 @@ def generate_html_pdf(nome_destino, df_comparativo, cenario_metrics, df_abrangen
         df_ex['Valor dentro do prazo'] = df_ex['Valor dentro do prazo'].apply(format_money)
         df_ex['Valor fora do prazo'] = df_ex['Valor fora do prazo'].apply(format_money)
         html_content += generate_simple_html_table(df_ex)
+        html_content += f"""<div class="page-break"></div>"""
 
     if tabelas_atuais_pdf:
-        html_content += f"""<div class="page-break"></div><h2>3. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
+        html_content += f"""<h2>3. TABELAS FRETE PESO ATUAIS (ORIGENS ENVOLVIDAS)</h2>"""
         for leve_nome, df_tab in tabelas_atuais_pdf.items():
             html_content += f"<h3>Leve Atual: {leve_nome}</h3>"
             html_content += generate_simple_html_table(df_tab)
@@ -612,7 +615,8 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     config_key = f"{','.join(leves_selecionados)}_{nome_destino_final}"
                     if "mov_config_key" not in st.session_state or st.session_state.mov_config_key != config_key:
                         df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
-                        df_mov = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].copy()
+                        # DEDUPLICAR NA ORIGEM BLINDA ERROS DE VOLUME E FATUREMENTO
+                        df_mov = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].drop_duplicates(subset=['LMC Name', 'Cidade']).copy()
                         df_mov['Destino'] = "Manter no Leve Atual"
                         st.session_state.df_movimentacao = df_mov
                         st.session_state.mov_config_key = config_key
@@ -654,7 +658,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     st.session_state.df_movimentacao = df_editado
                     df_movidos = df_editado[df_editado['Destino'] == nome_destino_final].copy()
 
-                # --- PROCESSAMENTO BASE E ESTRATÉGIA ---
+                # --- PROCESSAMENTO BASE NEUTRA E ESTRATÉGIA ---
                 df_abrangencia_existente = pd.DataFrame(columns=['LMC Name', 'Região de preço', 'Cidade', 'State', 'Observação'])
                 if tipo_destino == "Um Leve Existente (já selecionado)":
                     df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
@@ -674,14 +678,17 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 
                 regioes_finais_destino = sorted(df_escopo_final['Região de preço'].unique().tolist())
 
+                # Calcula a tabela base (Neutra) antecipadamente
                 df_tabelas_base_list = []
                 dict_base_on = {}
+                
+                # Mapeamento do multiplicador APENAS pelos 2 primeiros dígitos (Para evitar bug com nomes das faixas)
+                mult_dict_cod = dict(zip(df_price_var_clean['Cod'], df_price_var_clean['Multiplicador']))
                 
                 for reg in regioes_finais_destino:
                     cidades_mov_regiao = df_movidos[df_movidos['Região de preço'] == reg]
                     custo_alvo_on = 0
                     soma_vol_mult = 0
-                    mult_dict = dict(zip(df_price_var_clean['Faixa de peso cubado (g)'], df_price_var_clean['Multiplicador']))
                     
                     def calc_base_vol(cidades_df, lmc_col):
                         v = 0; c_on = 0; s_mult = 0; c_atual = 0
@@ -691,10 +698,12 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             vols = df_volume[(df_volume['Leve'] == leve_orig) & (df_volume['Cidade_Normalizada'] == normalize_string(cid))]
                             for _, v_row in vols.iterrows():
                                 fx = v_row['Faixa de peso cubado (g)']
+                                fx_cod = str(fx).strip()[:2]
                                 qtd = v_row['# Total Packages']
                                 tb_antiga = df_frete_clean[(df_frete_clean['LMC name'] == leve_orig) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
                                 p_on = tb_antiga['on time amount'].values[0] if not tb_antiga.empty else 0
-                                v += qtd; c_atual += qtd * p_on; c_on += qtd * p_on; s_mult += qtd * mult_dict.get(fx, 1.0)
+                                v += qtd; c_atual += qtd * p_on; c_on += qtd * p_on
+                                s_mult += qtd * mult_dict_cod.get(fx_cod, 1.0)
                         return v, c_on, s_mult, c_atual
 
                     v1, co1, sm1, ca1 = calc_base_vol(cidades_mov_regiao, 'LMC Name')
@@ -709,7 +718,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     base_on = custo_alvo_on / soma_vol_mult if soma_vol_mult > 0 else 0
                     dict_base_on[reg] = base_on
                     
-                    df_regiao_base = df_price_var_clean.copy()
+                    faixas_unicas = sorted(df_frete_clean['Faixa de peso cubado (g)'].dropna().unique())
+                    df_regiao_base = pd.DataFrame({'Faixa de peso cubado (g)': faixas_unicas})
+                    df_regiao_base['Cod'] = df_regiao_base['Faixa de peso cubado (g)'].astype(str).str.strip().str[:2]
+                    df_regiao_base['Multiplicador'] = df_regiao_base['Cod'].map(mult_dict_cod).fillna(1.0)
+                    
                     df_regiao_base['Região de Preço'] = reg
                     df_regiao_base['Valor dentro do prazo'] = df_regiao_base['Multiplicador'] * base_on
                     df_regiao_base['Valor fora do prazo'] = df_regiao_base['Multiplicador'] * base_on
@@ -743,6 +756,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     tabelas_atuais_pdf = {}
                     cenario_metrics = {}
                     
+                    # CÁLCULO DE CONTEXTO (Seção 8)
                     context_data = []
                     for reg in regioes_finais_destino:
                         cidades_reg = df_escopo_final[df_escopo_final['Região de preço'] == reg]
@@ -870,7 +884,12 @@ if file_frete and file_abrangencia and file_slos and file_volume:
 
                                 base_on = dict_base_on.get(regiao, 0)
                                 
-                                df_regiao_tabela = df_price_var_clean.copy()
+                                # Monta tabela base com as faixas REAIS atuais
+                                faixas_unicas = sorted(df_frete_clean['Faixa de peso cubado (g)'].dropna().unique())
+                                df_regiao_tabela = pd.DataFrame({'Faixa de peso cubado (g)': faixas_unicas})
+                                df_regiao_tabela['Cod'] = df_regiao_tabela['Faixa de peso cubado (g)'].astype(str).str.strip().str[:2]
+                                df_regiao_tabela['Multiplicador'] = df_regiao_tabela['Cod'].map(mult_dict_cod).fillna(1.0)
+                                
                                 df_regiao_tabela['Região de Preço'] = regiao
                                 df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
                                 df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
@@ -887,11 +906,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         soma_vol_mult = 0
                                         def calc_smult(cidades_df, lmc_col):
                                             sm = 0
-                                            mult_dict = dict(zip(df_price_var_clean['Faixa de peso cubado (g)'], df_price_var_clean['Multiplicador']))
                                             for _, r in cidades_df.iterrows():
                                                 vols = df_volume[(df_volume['Leve'] == r[lmc_col]) & (df_volume['Cidade_Normalizada'] == normalize_string(r['Cidade']))]
                                                 for _, v_row in vols.iterrows():
-                                                    sm += v_row['# Total Packages'] * mult_dict.get(v_row['Faixa de peso cubado (g)'], 1.0)
+                                                    fx_cod = str(v_row['Faixa de peso cubado (g)']).strip()[:2]
+                                                    sm += v_row['# Total Packages'] * mult_dict_cod.get(fx_cod, 1.0)
                                             return sm
                                         s1 = calc_smult(cidades_mov_regiao, 'LMC Name')
                                         soma_vol_mult += s1
@@ -912,7 +931,6 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 lista_tabelas_regiao.append(df_regiao_tabela[['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']])
                             
                             df_tabela_final = pd.concat(lista_tabelas_regiao, ignore_index=True)
-                            df_tabela_final.rename(columns={'Faixa de peso (g/m³)': 'Faixa de peso cubado (g)'}, inplace=True)
                             dict_tabelas_finais[cenario_nome] = df_tabela_final
                             
                             g_vol_dest = 0; g_custo_dest = 0; g_vol_migr = 0; g_custo_migr = 0; g_custo_novo = 0
@@ -1095,12 +1113,12 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 elif "Vol" in c:
                                     df_disp[c] = df_disp[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
                             
-                            # Tabela HTML Customizada para não ser sobreescrita pelo modo Escuro do Streamlit
+                            # Tabela HTML Customizada para contornar o Dark Mode do Streamlit e garantir cor correta
                             html_table = f"""
                             <style>
-                                .custom-summary-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; font-family: 'Inter', sans-serif; font-size: 14px; background-color: white; }}
-                                .custom-summary-table th {{ background-color: #002766; color: #ffffff; font-weight: bold; text-align: center; padding: 10px 5px; border: 1px solid #e0e0e0; }}
-                                .custom-summary-table td {{ padding: 8px 5px; border: 1px solid #e0e0e0; text-align: center; }}
+                                .custom-summary-table {{ width: 100%; border-collapse: collapse; margin-bottom: 20px; font-family: 'Inter', sans-serif; font-size: 14px; background-color: white !important; color: black !important; }}
+                                .custom-summary-table th {{ background-color: #002766 !important; color: #ffffff !important; font-weight: bold; text-align: center; padding: 10px 5px; border: 1px solid #e0e0e0; }}
+                                .custom-summary-table td {{ padding: 8px 5px; border: 1px solid #e0e0e0; text-align: center; color: black !important; }}
                             </style>
                             <table class="custom-summary-table"><thead><tr>
                             """
@@ -1131,7 +1149,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                             bg_color = "#002766"
                                             text_color = "#ffffff"
                                             
-                                    style_str = f"background-color: {bg_color}; color: {text_color}; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color};"
+                                    style_str = f"background-color: {bg_color} !important; color: {text_color} !important; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color} !important;"
                                     html_table += f"<td style='{style_str}'>{val}</td>"
                                 html_table += "</tr>"
                             html_table += "</tbody></table>"
@@ -1262,6 +1280,11 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             st.markdown("Apresentação completa com resumo e impacto de cada cenário.")
                             
                             if HAS_PDF_GENERATOR:
+                                if not df_movidos.empty:
+                                    cidades_movimentadas_str = ", ".join(sorted(df_movidos['Cidade'].str.title().unique().tolist()))
+                                else:
+                                    cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
+
                                 pdf_data = generate_html_pdf(
                                     nome_destino_final, df_comparativo, cenario_metrics, 
                                     df_escopo_final[colunas_finais_abrangencia], 
