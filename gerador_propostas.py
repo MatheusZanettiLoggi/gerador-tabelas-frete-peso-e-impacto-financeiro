@@ -86,7 +86,14 @@ def formatar_moeda(valor):
     except:
         return str(valor)
 
-# APLICADA A REGRA DE LIMPEZA DO " B" NAS FUNÇÕES ABAIXO
+# Função Cirúrgica para remover APENAS o sufixo " B" isolado no final
+def remover_sufixo_b(val):
+    if pd.isna(val): return val
+    s = str(val).strip()
+    if s.endswith(" B"):
+        return s[:-2].strip()
+    return s
+
 def padronizar_colunas_frete(df):
     mapa = {
         "Leve Contract Region LMC name": "LMC name",
@@ -100,7 +107,7 @@ def padronizar_colunas_frete(df):
     }
     df = df.rename(columns=mapa)
     if 'label' in df.columns:
-        df['label'] = df['label'].astype(str).str.strip().str.replace(r'\s+B$', '', regex=True)
+        df['label'] = df['label'].apply(remover_sufixo_b)
     return df
 
 def padronizar_colunas_abrangencia(df):
@@ -114,7 +121,7 @@ def padronizar_colunas_abrangencia(df):
     }
     df = df.rename(columns=mapa)
     if 'Região de preço 2023' in df.columns:
-        df['Região de preço 2023'] = df['Região de preço 2023'].astype(str).str.strip().str.replace(r'\s+B$', '', regex=True)
+        df['Região de preço 2023'] = df['Região de preço 2023'].apply(remover_sufixo_b)
     return df
 
 def padronizar_colunas_slos(df):
@@ -127,7 +134,7 @@ def padronizar_colunas_slos(df):
     }
     df = df.rename(columns=mapa)
     if 'Região de preço 2023' in df.columns:
-        df['Região de preço 2023'] = df['Região de preço 2023'].astype(str).str.strip().str.replace(r'\s+B$', '', regex=True)
+        df['Região de preço 2023'] = df['Região de preço 2023'].apply(remover_sufixo_b)
     return df
 
 def padronizar_colunas_volume(df):
@@ -145,14 +152,15 @@ def padronizar_colunas_volume(df):
     }
     df = df.rename(columns=mapa)
     if 'Região de preço' in df.columns:
-        df['Região de preço'] = df['Região de preço'].astype(str).str.strip().str.replace(r'\s+B$', '', regex=True)
+        df['Região de preço'] = df['Região de preço'].apply(remover_sufixo_b)
     return df
 
 @st.cache_data
 def processar_frete(df_frete):
-    df_recentes = df_frete.drop_duplicates(subset=['LMC name'], keep='first')
-    tabelas_validas = df_recentes[['LMC name', 'table name']]
-    df_filtrado = df_frete.merge(tabelas_validas, on=['LMC name', 'table name'], how='inner')
+    # Correção: O Looker traz tabelas inativas no histórico.
+    # Em vez de pegar apenas 1 nome de tabela (que excluía o RJ CAP), 
+    # pegamos a tarifa mais recente cravada para CADA Região e Faixa separadamente.
+    df_filtrado = df_frete.drop_duplicates(subset=['LMC name', 'label', 'Faixa de peso cubado (g)'], keep='first')
     return df_filtrado
 
 @st.cache_data
@@ -1099,8 +1107,10 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     st.markdown(f"**Faturamento Projetado:** {f_novo}")
                                     st.markdown(f"**Ticket Médio:** {t_novo}")
                                     
-                                    # CÓDIGO CEGO PARA STREAMLIT (Injetando HTML puro para não ter erro de cor)
-                                    st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: -5px;'>{formatar_moeda(abs(imp))}</div>", unsafe_allow_html=True)
+                                    # CÓDIGO CEGO PARA STREAMLIT (Injetando HTML puro para não ter erro de cor de delta)
+                                    st.markdown(f"<div style='font-size: 14px; color: gray;'>Diferença Mensal</div>", unsafe_allow_html=True)
+                                    st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(imp))}</div>", unsafe_allow_html=True)
+                                    
                                     if imp > 0:
                                         st.markdown(f"<div style='color: #ff4b4b; background-color: #ffcccc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold;'>▲ +{formatar_moeda(imp)} (Aumento de Custo)</div>", unsafe_allow_html=True)
                                         st.markdown(f"<div style='margin-top: 10px;'>**% Aumento:** <span style='color:#ff4b4b'>▲ +{imp_perc:.2f}%</span></div>", unsafe_allow_html=True)
@@ -1197,17 +1207,18 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
                                     st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
                                 with cl3:
+                                    # CÓDIGO HTML BLINDADO PARA IMPACTO LOGGI
                                     st.markdown(f"<div style='font-size: 14px; color: gray;'>Impacto Financeiro Loggi</div>", unsafe_allow_html=True)
-                                    st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: -5px;'>{formatar_moeda(abs(m['imp_loggi']))}</div>", unsafe_allow_html=True)
+                                    st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(m['imp_loggi']))}</div>", unsafe_allow_html=True)
                                     
                                     if m['imp_loggi'] > 0:
-                                        st.markdown(f"<div style='color: #ff4b4b; background-color: #ffcccc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-top: 5px; margin-bottom: 5px;'>▲ +{formatar_moeda(m['imp_loggi'])} (Aumento de Custo)</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='color: #ff4b4b; background-color: #ffcccc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>▲ +{formatar_moeda(m['imp_loggi'])} (Aumento de Custo)</div>", unsafe_allow_html=True)
                                         st.markdown(f"**% Aumento:** <span style='color:#ff4b4b'>▲ +{m['perc_imp_loggi']:.2f}% de impacto no budget</span>", unsafe_allow_html=True)
                                     elif m['imp_loggi'] < 0:
-                                        st.markdown(f"<div style='color: #09ab3b; background-color: #ccffcc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-top: 5px; margin-bottom: 5px;'>▼ -{formatar_moeda(abs(m['imp_loggi']))} (Economia)</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='color: #09ab3b; background-color: #ccffcc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>▼ -{formatar_moeda(abs(m['imp_loggi']))} (Economia)</div>", unsafe_allow_html=True)
                                         st.markdown(f"**% Aumento:** <span style='color:#09ab3b'>▼ {m['perc_imp_loggi']:.2f}% de economia no budget</span>", unsafe_allow_html=True)
                                     else:
-                                        st.markdown(f"<div style='color: gray; background-color: #f0f0f0; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-top: 5px; margin-bottom: 5px;'>■ R$ 0,00 (Neutro)</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='color: gray; background-color: #f0f0f0; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>■ R$ 0,00 (Neutro)</div>", unsafe_allow_html=True)
                                         st.markdown(f"**% Aumento:** <span style='color:gray'>■ 0.00%</span>", unsafe_allow_html=True)
                                 
                                 if m['detalhes_regioes']:
