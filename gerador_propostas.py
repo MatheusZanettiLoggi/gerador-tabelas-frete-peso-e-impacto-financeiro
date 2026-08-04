@@ -157,9 +157,7 @@ def padronizar_colunas_volume(df):
 
 @st.cache_data
 def processar_frete(df_frete):
-    # Correção: O Looker traz tabelas inativas no histórico.
-    # Em vez de pegar apenas 1 nome de tabela (que excluía o RJ CAP), 
-    # pegamos a tarifa mais recente cravada para CADA Região e Faixa separadamente.
+    # Alterado para blindar remoção indevida do RJ CAP: agora pega apenas a tabela única por Região + Faixa.
     df_filtrado = df_frete.drop_duplicates(subset=['LMC name', 'label', 'Faixa de peso cubado (g)'], keep='first')
     return df_filtrado
 
@@ -716,20 +714,17 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                 df_escopo_final['Novo SLO Local'] = df_escopo_final['Novo SLO Local'].apply(lambda x: x if pd.notnull(x) and x > 0 else 0).astype(int)
                 colunas_finais_abrangencia = ['Cidade', 'State', 'Região de preço', 'Novo SLO Local', 'Observação']
                 
+                # A LISTA MESTRE DE REGIÕES AGORA VEM DA ABRANGÊNCIA FINAL (BLINDANDO RJ CAP)
                 regioes_finais_destino = sorted(df_escopo_final['Região de preço'].unique().tolist())
 
-                # ISOLAMENTO DA VOLUMETRIA (Para garantir cálculos precisos e sem inflar)
                 leves_para_volume = list(set(leves_selecionados + ([nome_destino_final] if tipo_destino == "Um Leve Existente (já selecionado)" else [])))
                 df_volume_alvo = df_volume[df_volume['Leve'].isin(leves_para_volume)].copy()
-                regioes_volume = sorted(df_volume_alvo['Região de preço'].dropna().unique().tolist())
 
                 df_tabelas_base_list = []
                 dict_base_on = {}
-                
-                # Multiplicador extraído pelo Código para blindar strings desatualizadas
                 mult_dict_cod = dict(zip(df_price_var_clean['Cod'], df_price_var_clean['Multiplicador']))
                 
-                for reg in regioes_volume:
+                for reg in regioes_finais_destino:
                     vols_reg = df_volume_alvo[df_volume_alvo['Região de preço'] == reg]
                     c_on = 0; s_mult = 0
                     
@@ -745,7 +740,22 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                         c_on += qtd * p_on
                         s_mult += qtd * mult_dict_cod.get(fx_cod, 1.0)
                         
-                    base_on = c_on / s_mult if s_mult > 0 else 0
+                    if s_mult > 0:
+                        base_on = c_on / s_mult
+                    else:
+                        # FALLBACK SE A REGIÃO TEM 0 VOLUME (Ex: RJ CAP)
+                        lmc_fallback_list = df_movidos[df_movidos['Região de preço'] == reg]['LMC Name'].tolist()
+                        if not lmc_fallback_list and tipo_destino == "Um Leve Existente (já selecionado)":
+                            lmc_fallback_list = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == reg]['LMC Name'].tolist()
+                        
+                        base_on = 0
+                        if lmc_fallback_list:
+                            lmc_fallback = lmc_fallback_list[0]
+                            tb_fallback = df_frete_clean[(df_frete_clean['LMC name'] == lmc_fallback) & (df_frete_clean['label'] == reg)]
+                            fx1 = tb_fallback[tb_fallback['Faixa de peso cubado (g)'].astype(str).str.startswith('01')]
+                            if not fx1.empty:
+                                base_on = fx1['on time amount'].values[0] / 0.83
+
                     dict_base_on[reg] = base_on
                     
                     faixas_unicas = sorted(df_frete_clean['Faixa de peso cubado (g)'].dropna().unique())
@@ -792,9 +802,9 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                     tot_vol_context = 0
                     tot_fat_context = 0
                     
-                    for reg in regioes_volume:
+                    for reg in regioes_finais_destino:
                         vols_reg = df_volume_alvo[df_volume_alvo['Região de preço'] == reg]
-                        vol_total = vols_reg['# Total Packages'].sum()
+                        vol_total = vols_reg['# Total Packages'].sum() if not vols_reg.empty else 0
                         c_on_total = 0
                         
                         for _, r in vols_reg.iterrows():
@@ -805,15 +815,14 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             p_on = tb['on time amount'].values[0] if not tb.empty else 0
                             c_on_total += qtd * p_on
                             
-                        if vol_total > 0:
-                            context_raw.append({
-                                "Região de Preço": reg,
-                                "Volumetria (30d)": int(vol_total),
-                                "Faturamento Atual": c_on_total,
-                                "Valor 1ª Faixa (Base)": dict_base_on.get(reg, 0) * 0.83
-                            })
-                            tot_vol_context += vol_total
-                            tot_fat_context += c_on_total
+                        context_raw.append({
+                            "Região de Preço": reg,
+                            "Volumetria (30d)": int(vol_total),
+                            "Faturamento Atual": c_on_total,
+                            "Valor 1ª Faixa (Base)": dict_base_on.get(reg, 0) * 0.83
+                        })
+                        tot_vol_context += vol_total
+                        tot_fat_context += c_on_total
 
                     tot_tk_context = tot_fat_context / tot_vol_context if tot_vol_context > 0 else 0
                     
@@ -874,7 +883,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     def aplicar_global(c_id=cen_id):
                                         t = st.session_state[f"global_tipo_{c_id}"]
                                         v = st.session_state[f"global_val_{c_id}"]
-                                        for r in regioes_volume:
+                                        for r in regioes_finais_destino:
                                             st.session_state[f"tipo_{c_id}_{r}"] = t
                                             st.session_state[f"val_{c_id}_{r}"] = v
                                     st.button("Aplicar a todas", key=f"btn_glob_{cen_id}", on_click=aplicar_global)
@@ -882,7 +891,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 st.divider()
                                 st.markdown("**Ajustes Individuais:**")
                                 cols_ajuste = st.columns(3)
-                                for i, regiao in enumerate(regioes_volume):
+                                for i, regiao in enumerate(regioes_finais_destino):
                                     if f"tipo_{cen_id}_{regiao}" not in st.session_state: st.session_state[f"tipo_{cen_id}_{regiao}"] = "%"
                                     if f"val_{cen_id}_{regiao}" not in st.session_state: st.session_state[f"val_{cen_id}_{regiao}"] = 0.0
                                     
@@ -914,9 +923,9 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                             fat_simulado_total = 0
                             vol_total_cenario = 0
                             
-                            for regiao in regioes_volume:
+                            for regiao in regioes_finais_destino:
                                 vols_reg = df_volume_alvo[df_volume_alvo['Região de preço'] == regiao]
-                                vol_regiao_total_sim = vols_reg['# Total Packages'].sum()
+                                vol_regiao_total_sim = vols_reg['# Total Packages'].sum() if not vols_reg.empty else 0
                                 
                                 base_on = dict_base_on.get(regiao, 0)
                                 
@@ -937,13 +946,16 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                         val_fx1_atual = base_on * 0.83
                                         if val_fx1_atual > 0: ajuste_perc = ((ajuste_val / val_fx1_atual) - 1) * 100
                                     elif ajuste_tipo == "R$ (Ticket Médio)":
-                                        soma_vol_mult = 0
-                                        for _, v_row in vols_reg.iterrows():
-                                            fx_cod = str(v_row['Faixa de peso cubado (g)']).strip()[:2]
-                                            soma_vol_mult += v_row['# Total Packages'] * mult_dict_cod.get(fx_cod, 1.0)
-                                            
-                                        tk_projetado_base = (base_on * soma_vol_mult) / vol_regiao_total_sim if vol_regiao_total_sim > 0 else 0
-                                        if tk_projetado_base > 0: ajuste_perc = ((ajuste_val / tk_projetado_base) - 1) * 100
+                                        if vol_regiao_total_sim > 0:
+                                            soma_vol_mult = 0
+                                            for _, v_row in vols_reg.iterrows():
+                                                fx_cod = str(v_row['Faixa de peso cubado (g)']).strip()[:2]
+                                                soma_vol_mult += v_row['# Total Packages'] * mult_dict_cod.get(fx_cod, 1.0)
+                                                
+                                            tk_projetado_base = (base_on * soma_vol_mult) / vol_regiao_total_sim if vol_regiao_total_sim > 0 else 0
+                                            if tk_projetado_base > 0: ajuste_perc = ((ajuste_val / tk_projetado_base) - 1) * 100
+                                        else:
+                                            ajuste_perc = 0.0
                                     else:
                                         ajuste_perc = ajuste_val
                                         
@@ -1030,7 +1042,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                 "% Aumento": (fat_simulado_total / fat_atual_total - 1) if fat_atual_total > 0 else 0
                             })
 
-                            # Build metrics dictionary directly from the results
+                            # Build metrics dictionary
                             detalhes_regioes_indiv = {}
                             for res in resultados_cenarios:
                                 if res['Cenário'] == cenario_nome and res['Região de Preço'] != 'Total Geral':
@@ -1107,7 +1119,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     st.markdown(f"**Faturamento Projetado:** {f_novo}")
                                     st.markdown(f"**Ticket Médio:** {t_novo}")
                                     
-                                    # CÓDIGO CEGO PARA STREAMLIT (Injetando HTML puro para não ter erro de cor de delta)
+                                    # CONTROLE HTML BLINDADO PARA EVITAR BUG DE SETA E COR DO STREAMLIT
                                     st.markdown(f"<div style='font-size: 14px; color: gray;'>Diferença Mensal</div>", unsafe_allow_html=True)
                                     st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(imp))}</div>", unsafe_allow_html=True)
                                     
@@ -1207,7 +1219,7 @@ if file_frete and file_abrangencia and file_slos and file_volume:
                                     st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
                                     st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
                                 with cl3:
-                                    # CÓDIGO HTML BLINDADO PARA IMPACTO LOGGI
+                                    # CONTROLE HTML BLINDADO DA VISAO LOGGI
                                     st.markdown(f"<div style='font-size: 14px; color: gray;'>Impacto Financeiro Loggi</div>", unsafe_allow_html=True)
                                     st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(m['imp_loggi']))}</div>", unsafe_allow_html=True)
                                     
