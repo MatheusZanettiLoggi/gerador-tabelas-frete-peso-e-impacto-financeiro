@@ -148,24 +148,18 @@ def processar_frete(df_frete):
 @st.cache_data
 def processar_slos_novo(df):
     if len(df.columns) > 10:
-        # Assumindo a posição das colunas solicitadas (D=3, F=5, K=10)
         col_cidade = df.columns[3]
         col_regiao = df.columns[5]
         col_prazo = df.columns[10]
         
-        # Filtra 'Loggi Express' em qualquer lugar da linha
         mask_express = df.apply(lambda row: row.astype(str).str.contains('Loggi Express', case=False).any(), axis=1)
         df_filtered = df[mask_express].copy()
         
-        # Formata dados
         df_filtered['State'] = df_filtered[col_regiao].astype(str).str.strip().str[:2].str.upper()
         df_filtered['Cidade_str'] = df_filtered[col_cidade].astype(str).str.strip()
-        
-        # Gera Chave normalizada para cruzamento seguro (ex: araguainato)
         df_filtered['Chave'] = df_filtered['Cidade_str'].apply(normalize_string) + df_filtered['State'].str.lower()
         df_filtered['SLO'] = pd.to_numeric(df_filtered[col_prazo], errors='coerce')
         
-        # Seleciona o prazo mínimo caso existam duplicatas
         df_grouped = df_filtered.groupby(['State', 'Cidade_str', 'Chave'], as_index=False)['SLO'].min()
         df_grouped.rename(columns={'Cidade_str': 'Cidade'}, inplace=True)
         return df_grouped
@@ -239,86 +233,64 @@ def formatar_excel_resumo(writer):
         ws = workbook[sheet_name]
         ws.sheet_view.showGridLines = False
 
-        if sheet_name == 'Resumo de Cenários':
-            col_formats = {}
-            cols_impacto = []
-            
-            for cell in ws[1]:
-                val_str = str(cell.value).lower()
-                if "fat" in val_str or "ticket" in val_str or "tk" in val_str or "impacto" in val_str or "atual" in val_str:
-                    if "volumetria" not in val_str:
-                        col_formats[cell.column_letter] = '"R$" #,##0.00'
-                    if "impacto" in val_str: cols_impacto.append(cell.column_letter)
-                elif "%" in val_str or "aum" in val_str:
-                    col_formats[cell.column_letter] = '0.00%'
-                    cols_impacto.append(cell.column_letter)
-                elif "volumetria" in val_str or "volume" in val_str:
-                    col_formats[cell.column_letter] = '0' 
+        col_formats = {}
+        cols_impacto = []
+        header_rows = []
 
-            for row in ws.iter_rows():
-                ws.row_dimensions[row[0].row].height = 18
-                is_header = (row[0].row == 1)
-                is_total = ("Total Geral" in str(row[0].value))
-
+        # Localiza todas as linhas de cabeçalho na planilha (Pois abas de detalhamento tem duas tabelas agora)
+        for row in ws.iter_rows():
+            first_val = str(row[0].value).strip() if row[0].value is not None else ""
+            if first_val in ['Região de Preço', 'Tipo', 'Regiao de Preco']:
+                header_rows.append(row[0].row)
                 for cell in row:
-                    cell.alignment = alinhamento
-                    cell.border = borda_cinza
+                    val_str = str(cell.value).lower()
+                    if any(x in val_str for x in ['fat', 'ticket', 'tk', 'impacto', 'atual', '(r$)', 'tarifa', 'custo', 'diferença', 'projetado']):
+                        if "volumetria" not in val_str and "pacotes" not in val_str:
+                            col_formats[cell.column_letter] = '"R$" #,##0.00'
+                        if "impacto" in val_str: cols_impacto.append(cell.column_letter)
+                    elif "%" in val_str or "aum" in val_str:
+                        col_formats[cell.column_letter] = '0.00%'
+                        cols_impacto.append(cell.column_letter)
+                    elif "volumetria" in val_str or "volume" in val_str or "pacotes" in val_str:
+                        col_formats[cell.column_letter] = '#,##0'
+
+        for row in ws.iter_rows():
+            ws.row_dimensions[row[0].row].height = 18
+            is_header = row[0].row in header_rows
+            is_total = ("Total Geral" in str(row[0].value))
+
+            for cell in row:
+                if cell.value is None and not is_total:
+                    continue
                     
-                    if cell.column_letter in col_formats and isinstance(cell.value, (int, float)):
-                        cell.number_format = col_formats[cell.column_letter]
-
-                    if is_header:
-                        cell.font = font_cabecalho
-                    elif is_total:
-                        if cell.column_letter in cols_impacto:
-                            cell.font = font_destaque_red
-                            cell.fill = fill_red
-                        else:
-                            cell.font = font_total
-                            cell.fill = fill_total
-                    else:
-                        cell.font = font_padrao
-
-            for col in ws.columns:
-                max_length = 0
-                column = col[0].column_letter
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
-                    except: pass
-                ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
-                
-        else: 
-            col_formats = {}
-            for cell in ws[1]:
-                val_str = str(cell.value).lower()
-                if "(r$)" in val_str or "tarifa" in val_str or "custo" in val_str or "diferença" in val_str:
-                    col_formats[cell.column_letter] = '"R$" #,##0.00'
-                elif "(%)" in val_str:
-                    col_formats[cell.column_letter] = '0.00%'
-                elif "pacotes" in val_str:
-                    col_formats[cell.column_letter] = '#,##0'
-
-            for row in ws.iter_rows():
-                ws.row_dimensions[row[0].row].height = 18
-                for cell in row:
-                    cell.alignment = alinhamento
+                cell.alignment = alinhamento
+                if cell.value is not None:
                     cell.border = borda_cinza
-                    if cell.row == 1:
-                        cell.font = font_cabecalho
-                    else:
-                        cell.font = font_padrao
-                        if cell.column_letter in col_formats and isinstance(cell.value, (int, float)):
-                            cell.number_format = col_formats[cell.column_letter]
+                
+                if cell.column_letter in col_formats and isinstance(cell.value, (int, float)):
+                    cell.number_format = col_formats[cell.column_letter]
 
-            for col in ws.columns:
-                max_length = 0
-                column = col[0].column_letter
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
-                    except: pass
-                ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
+                if is_header:
+                    cell.font = font_cabecalho
+                elif is_total and cell.value is not None:
+                    if cell.column_letter in cols_impacto:
+                        cell.font = font_destaque_red
+                        cell.fill = fill_red
+                    else:
+                        cell.font = font_total
+                        cell.fill = fill_total
+                else:
+                    if cell.value is not None:
+                        cell.font = font_padrao
+
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            for cell in col:
+                try:
+                    if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                except: pass
+            ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
 
 # --- GERADOR DE PDF ---
 def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
@@ -553,14 +525,12 @@ if file_frete and file_abrangencia and file_volume:
                 df_price_var_clean = processar_price_var(df_price_var_raw)
                 df_frete_clean = processar_frete(df_frete)
                 
-                # NOVO MAPEAMENTO DE SLOs
                 df_slos_clean = processar_slos_novo(df_slos_raw)
                 
                 df_nomes_leves = processar_nomes_leves(df_volume)
                 
                 df_volume['Faixa de peso cubado (g)'] = df_volume['Faixa de peso cubado (g)'].astype(str).str.strip()
                 
-                # AGRUPAMENTO COM A REGIÃO DO VOLUME (Para garantir faturamento real exato)
                 df_volume_grouped = df_volume.groupby(
                     ['Leve', 'Cidade_Normalizada', 'Região de preço', 'Faixa de peso cubado (g)'],
                     as_index=False
@@ -620,6 +590,44 @@ if file_frete and file_abrangencia and file_volume:
                             cidades_base_dict[leve] = opcoes_cidades[cidade_escolhida_display]
         
                 with st.expander("4. Dados Atuais dos Leves Selecionados", expanded=False):
+                    
+                    st.markdown("### ℹ️ Contexto Atual das Bases Selecionadas")
+                    context_atuais_display = []
+                    for leve in leves_selecionados:
+                        vols_leve = df_volume[df_volume['Leve'] == leve]
+                        regioes = vols_leve['Região de preço'].dropna().unique()
+                        for reg in regioes:
+                            vols_reg = vols_leve[vols_leve['Região de preço'] == reg]
+                            vol_reg = vols_reg['# Total Packages'].sum()
+                            fat_reg = 0
+                            for _, r in vols_reg.iterrows():
+                                fx = r['Faixa de peso cubado (g)']
+                                qtd = r['# Total Packages']
+                                tb = df_frete_clean[(df_frete_clean['LMC name'] == leve) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
+                                p_on = tb['on time amount'].values[0] if not tb.empty else 0
+                                fat_reg += qtd * p_on
+                            
+                            tb_fx1 = df_frete_clean[(df_frete_clean['LMC name'] == leve) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso cubado (g)'].str.startswith('01'))]
+                            v_fx1 = tb_fx1['on time amount'].values[0] if not tb_fx1.empty else 0
+                            tk_reg = fat_reg / vol_reg if vol_reg > 0 else 0
+                            
+                            if vol_reg > 0:
+                                context_atuais_display.append({
+                                    "Base (LMC)": leve,
+                                    "Região de Preço": reg,
+                                    "Volumetria (30d)": f"{int(vol_reg): ,}".replace(',', '.'),
+                                    "Faturamento Atual": formatar_moeda(fat_reg),
+                                    "Valor 1ª Faixa Atual": formatar_moeda(v_fx1),
+                                    "Ticket Médio Atual": formatar_moeda(tk_reg)
+                                })
+                    
+                    if context_atuais_display:
+                        st.dataframe(pd.DataFrame(context_atuais_display), hide_index=True, use_container_width=True)
+                    else:
+                        st.info("Nenhuma volumetria recente encontrada para as bases selecionadas.")
+                    
+                    st.divider()
+
                     df_abrangencia.rename(columns={'Região de preço 2023': 'Região de preço'}, inplace=True)
                     tab1, tab2 = st.tabs(["Tabela Frete Peso Atual", "Abrangência e Prazos"])
                     with tab1:
@@ -668,7 +676,6 @@ if file_frete and file_abrangencia and file_volume:
                         config_key = f"{','.join(leves_selecionados)}_{nome_destino_final}"
                         if "mov_config_key" not in st.session_state or st.session_state.mov_config_key != config_key:
                             df_abrangencia_alvo = df_abrangencia[df_abrangencia['LMC Name'].isin(leves_selecionados)].copy()
-                            # DEDUPLICAR NA ORIGEM BLINDA ERROS DE VOLUME E FATURAMENTO
                             df_mov = df_abrangencia_alvo[['LMC Name', 'Região de preço', 'Cidade', 'State']].drop_duplicates(subset=['LMC Name', 'Cidade']).copy()
                             df_mov['Destino'] = "Manter no Leve Atual"
                             st.session_state.df_movimentacao = df_mov
@@ -715,27 +722,22 @@ if file_frete and file_abrangencia and file_volume:
                     df_abrangencia_existente = pd.DataFrame(columns=['LMC Name', 'Região de preço', 'Cidade', 'State', 'Observação'])
                     if tipo_destino == "Um Leve Existente (já selecionado)":
                         df_abrangencia_existente = df_abrangencia[df_abrangencia['LMC Name'] == nome_destino_final].copy()
-                        # MODIFICAÇÃO SOLICITADA NA OBSERVAÇÃO
                         df_abrangencia_existente['Observação'] = f"Abrangência atual de {nome_destino_final}"
                     
                     df_movidos_fmt = df_movidos.copy()
                     df_movidos_fmt['Observação'] = "Migrado de: " + df_movidos_fmt['LMC Name']
                     df_escopo_final = pd.concat([df_abrangencia_existente[['Cidade', 'State', 'Região de preço', 'Observação']], df_movidos_fmt[['Cidade', 'State', 'Região de preço', 'Observação']]], ignore_index=True).drop_duplicates(subset=['Cidade'])
                     
-                    # ENCONTRA SLO DA CIDADE BASE
                     slo_base_dest = df_slos_clean[df_slos_clean['Chave'] == cidade_base_destino]['SLO'].values
                     slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
                     
-                    # GERA A CHAVE PARA O ESCOPO FINAL PARA CRUZAR COM OS SLOS
                     df_escopo_final['Chave_Alvo'] = df_escopo_final['Cidade'].apply(normalize_string) + df_escopo_final['State'].astype(str).str.strip().str[:2].str.lower()
                     
-                    # CALCULA O NOVO SLO
                     df_escopo_final = df_escopo_final.merge(df_slos_clean[['Chave', 'SLO']], left_on='Chave_Alvo', right_on='Chave', how='left')
                     df_escopo_final['Novo SLO Local'] = df_escopo_final['SLO'] - slo_base_dest_val
                     df_escopo_final['Novo SLO Local'] = df_escopo_final['Novo SLO Local'].apply(lambda x: x if pd.notnull(x) and x > 0 else 0).astype(int)
                     colunas_finais_abrangencia = ['Cidade', 'State', 'Região de preço', 'Novo SLO Local', 'Observação']
                     
-                    # A LISTA MESTRE DE REGIÕES AGORA VEM DA ABRANGÊNCIA FINAL (BLINDANDO RJ CAP)
                     regioes_finais_destino = sorted(df_escopo_final['Região de preço'].unique().tolist())
     
                     leves_para_volume = list(set(leves_selecionados + ([nome_destino_final] if tipo_destino == "Um Leve Existente (já selecionado)" else [])))
@@ -764,7 +766,6 @@ if file_frete and file_abrangencia and file_volume:
                         if s_mult > 0:
                             base_on = c_on / s_mult
                         else:
-                            # FALLBACK SE A REGIÃO TEM 0 VOLUME (Ex: RJ CAP)
                             lmc_fallback_list = df_movidos[df_movidos['Região de preço'] == reg]['LMC Name'].tolist()
                             if not lmc_fallback_list and tipo_destino == "Um Leve Existente (já selecionado)":
                                 lmc_fallback_list = df_abrangencia_existente[df_abrangencia_existente['Região de preço'] == reg]['LMC Name'].tolist()
@@ -1140,7 +1141,7 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"**Faturamento Projetado:** {f_novo}")
                                         st.markdown(f"**Ticket Médio:** {t_novo}")
                                         
-                                        # CONTROLE HTML BLINDADO PARA EVITAR BUG DE SETA E COR DO STREAMLIT
+                                        # CONTROLE HTML BLINDADO (Forçando CSS puro para as setas e cores não dependerem do st.metric)
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Diferença Mensal</div>", unsafe_allow_html=True)
                                         st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(imp))}</div>", unsafe_allow_html=True)
                                         
@@ -1240,7 +1241,7 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
                                     with cl3:
-                                        # CONTROLE HTML BLINDADO DA VISAO LOGGI
+                                        # CONTROLE HTML BLINDADO (Seta vermelha para cima no aumento)
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Impacto Financeiro Loggi</div>", unsafe_allow_html=True)
                                         st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(m['imp_loggi']))}</div>", unsafe_allow_html=True)
                                         
