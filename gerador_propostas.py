@@ -47,7 +47,7 @@ with st.sidebar.expander("1. Upload de Bases de Dados", expanded=True):
     st.markdown("[Link Looker: 26302](https://loggi.looker.com/looks/26302)")
     file_volume = st.file_uploader("Upload Volume", type=["xlsx", "csv"], label_visibility="collapsed")
 
-st.sidebar.markdown("<br><hr>", unsafe_allow_html=True)
+st.sidebar.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvido por <b>Matheus Zanetti</b></small></div>", unsafe_allow_html=True)
 
 # --- INICIALIZAÇÃO DE ESTADOS E CORES ---
 if "num_cenarios" not in st.session_state:
@@ -373,14 +373,22 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
     def generate_html_table_styled(df):
         if df is None or df.empty: return "<p>Sem dados.</p>"
         html = "<table><thead><tr>"
-        for col in df.columns: html += f"<th>{col}</th>"
+        for col in df.columns:
+            bg_color = "#002766" 
+            text_color = "#ffffff"
+            for i, cen in enumerate(cenarios_nomes):
+                if cen in col or f"Cenário {i+1}" in col:
+                    bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                    text_color = "#000000"
+                    break
+            html += f"<th style='background-color: {bg_color} !important; color: {text_color} !important;'>{col}</th>"
         html += "</tr></thead><tbody>"
         for _, row in df.iterrows():
             is_total = str(row.iloc[0]).lower() == 'total geral'
             html += "<tr>"
             for col_idx, val in enumerate(row):
                 col_name = df.columns[col_idx]
-                bg_color = ""
+                bg_color = "#ffffff"
                 text_color = "#333333"
                 font_weight = "normal"
                 
@@ -399,7 +407,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
                             text_color = "#000000"
                             break
                         
-                style_str = f"background-color: {bg_color}; color: {text_color}; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color};"
+                style_str = f"background-color: {bg_color} !important; color: {text_color} !important; font-weight: {font_weight};"
                 html += f"<td style='{style_str}'>{val}</td>"
             html += "</tr>"
         html += "</tbody></table>"
@@ -819,7 +827,6 @@ if file_frete and file_abrangencia and file_volume:
                         tabelas_atuais_pdf = {}
                         cenario_metrics = {}
                         
-                        # CÁLCULO DE CONTEXTO (Seção 8)
                         context_raw = []
                         tot_vol_context = 0
                         tot_fat_context = 0
@@ -1141,7 +1148,7 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"**Faturamento Projetado:** {f_novo}")
                                         st.markdown(f"**Ticket Médio:** {t_novo}")
                                         
-                                        # CONTROLE HTML BLINDADO (Forçando CSS puro para as setas e cores não dependerem do st.metric)
+                                        # CONTROLE HTML BLINDADO (Removido st.metric nativo para as variações para evitar bugs de visualização)
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Diferença Mensal</div>", unsafe_allow_html=True)
                                         st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(imp))}</div>", unsafe_allow_html=True)
                                         
@@ -1241,7 +1248,7 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
                                     with cl3:
-                                        # CONTROLE HTML BLINDADO (Seta vermelha para cima no aumento)
+                                        # CONTROLE HTML BLINDADO DA VISAO LOGGI
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Impacto Financeiro Loggi</div>", unsafe_allow_html=True)
                                         st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(m['imp_loggi']))}</div>", unsafe_allow_html=True)
                                         
