@@ -237,7 +237,6 @@ def formatar_excel_resumo(writer):
         cols_impacto = []
         header_rows = []
 
-        # Localiza todas as linhas de cabeçalho na planilha (Pois abas de detalhamento tem duas tabelas agora)
         for row in ws.iter_rows():
             first_val = str(row[0].value).strip() if row[0].value is not None else ""
             if first_val in ['Região de Preço', 'Tipo', 'Regiao de Preco']:
@@ -516,6 +515,15 @@ if file_frete and file_abrangencia and file_volume:
                 df_volume = padronizar_colunas_volume(df_volume)
                 
                 add_log("Bases carregadas com sucesso.")
+                
+            # TRAVAS DE SEGURANÇA
+            if 'LMC name' not in df_frete.columns:
+                st.error("🚨 **Arquivo de Frete Incorreto!** Você enviou um arquivo diferente no primeiro campo.")
+                st.stop()
+                
+            if 'Cidade' not in df_abrangencia.columns or 'LMC Name' not in df_abrangencia.columns:
+                st.error("🚨 **Arquivo de Abrangência Incorreto!** Você enviou um arquivo diferente no segundo campo.")
+                st.stop()
                 
             if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
                 st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
@@ -827,6 +835,7 @@ if file_frete and file_abrangencia and file_volume:
                         tabelas_atuais_pdf = {}
                         cenario_metrics = {}
                         
+                        # CÁLCULO DE CONTEXTO (Seção 8)
                         context_raw = []
                         tot_vol_context = 0
                         tot_fat_context = 0
