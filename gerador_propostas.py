@@ -927,14 +927,22 @@ if file_frete and file_abrangencia and file_volume:
                             else:
                                 st.info("Nenhuma volumetria recente encontrada para as cidades selecionadas.")
                                 
-                            c_head, c_btn = st.columns([5, 1.5])
+                            c_head, c_btn_add, c_btn_del = st.columns([5, 1.5, 1.5])
                             with c_head:
                                 st.markdown("### 🎛️ Configuração de Cenários")
-                            with c_btn:
+                            with c_btn_add:
                                 st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
                                 if st.button("➕ Novo Cenário", use_container_width=True):
                                     st.session_state["num_cenarios"] += 1
                                     st.rerun()
+                            with c_btn_del:
+                                st.markdown("<div style='margin-top: 15px;'></div>", unsafe_allow_html=True)
+                                if st.button("➖ Remover Cenário", use_container_width=True):
+                                    if st.session_state["num_cenarios"] > 1:
+                                        st.session_state["num_cenarios"] -= 1
+                                        st.rerun()
+                                    else:
+                                        st.toast("⚠️ É preciso ter ao menos 1 cenário.")
     
                             cenarios_nomes = [f"Cenário {i+1}" for i in range(st.session_state["num_cenarios"])]
                             
@@ -1195,7 +1203,6 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"**Faturamento Projetado:** {f_novo}")
                                         st.markdown(f"**Ticket Médio:** {t_novo}")
                                         
-                                        # CONTROLE HTML BLINDADO (Removido st.metric nativo para as variações para evitar bugs de visualização)
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Diferença Mensal</div>", unsafe_allow_html=True)
                                         
                                         val_imp_str = f"+{formatar_moeda(imp)}" if imp > 0 else (f"-{formatar_moeda(abs(imp))}" if imp < 0 else "R$ 0,00")
@@ -1284,7 +1291,6 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(m['tk_fat_novo'])}</span>", unsafe_allow_html=True)
                                     with cp3:
                                         st.metric("Crescimento da Operação", formatar_moeda(m['cresc_fat']))
-                                        # LÓGICA DE COR DO PARCEIRO CORRIGIDA (▲ Verde pra aumento, ▼ Vermelho pra perda)
                                         if m['perc_cresc'] > 0:
                                             st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▲ +{m['perc_cresc']:.2f}% de aumento no faturamento</span>", unsafe_allow_html=True)
                                         elif m['perc_cresc'] < 0:
@@ -1304,7 +1310,6 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
                                     with cl3:
-                                        # CONTROLE HTML BLINDADO DA VISAO LOGGI (Com sinal negativo visível no R$)
                                         val_imp = m['imp_loggi']
                                         str_imp = f"+{formatar_moeda(val_imp)}" if val_imp > 0 else (f"-{formatar_moeda(abs(val_imp))}" if val_imp < 0 else "R$ 0,00")
                                         
@@ -1389,16 +1394,31 @@ if file_frete and file_abrangencia and file_volume:
                                 output_res = io.BytesIO()
                                 with pd.ExcelWriter(output_res, engine='openpyxl') as writer:
                                     df_comparativo.to_excel(writer, sheet_name='Resumo de Cenários', index=False)
-                                    for cen_name, df_aud in dict_auditorias.items():
-                                        if not df_aud.empty:
+                                    for cen_idx, cen_name in enumerate(cenarios_nomes):
+                                        if cen_name in dict_auditorias and not dict_auditorias[cen_name].empty:
+                                            df_aud = dict_auditorias[cen_name]
                                             sn = f"Detalhes {cen_name}"[:31]
                                             
-                                            # INSERE O NOVO MINI RESUMO POR CENÁRIO NA ABA DE DETALHE
                                             cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
                                             df_cen_resumo = df_comparativo[cols_resumo].copy()
                                             
-                                            df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
-                                            df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 2, index=False)
+                                            empty_row = pd.DataFrame([[None]*len(df_cen_resumo.columns)], columns=df_cen_resumo.columns)
+                                            df_cen_resumo = pd.concat([df_cen_resumo, empty_row, empty_row], ignore_index=True)
+                                            
+                                            for c in df_aud.columns:
+                                                if c not in df_cen_resumo.columns:
+                                                    df_cen_resumo[c] = None
+                                            
+                                            df_aud_aligned = pd.DataFrame(columns=df_cen_resumo.columns)
+                                            for c in df_aud.columns:
+                                                df_aud_aligned[c] = df_aud[c]
+                                                
+                                            df_aud_aligned.loc[-1] = df_aud.columns
+                                            df_aud_aligned.index = df_aud_aligned.index + 1
+                                            df_aud_aligned = df_aud_aligned.sort_index()
+                                            
+                                            df_final_aba = pd.concat([df_cen_resumo, df_aud_aligned], ignore_index=True)
+                                            df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
                                             
                                     formatar_excel_resumo(writer, cenarios_nomes)
                                 
