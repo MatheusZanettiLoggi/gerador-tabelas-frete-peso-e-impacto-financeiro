@@ -8,6 +8,7 @@ import base64
 import json
 import zipfile
 import unicodedata
+import uuid
 from datetime import datetime, timezone, timedelta
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
@@ -297,7 +298,6 @@ def formatar_excel_resumo(writer, cenarios_nomes):
                 except: pass
             ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
 
-# --- GERADOR DE PDF ---
 def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
     fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
     data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
@@ -902,7 +902,7 @@ if data_ready:
                 file_name=f"Backup_Analise_Loggi_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
                 mime="application/zip",
                 use_container_width=True,
-                key="dl_backup"
+                key=f"dl_backup_{uuid.uuid4().hex}"
             )
             
             # --- PROCESSAMENTO DOS CENÁRIOS E RESULTADOS ---
@@ -1425,7 +1425,7 @@ if data_ready:
                                     df_escopo_final[colunas_finais_abrangencia_excel].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
                                     dict_tabelas_finais[cen].to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
                                     formatar_excel_proposta(writer)
-                                st.download_button(f"Baixar Proposta {cen}", data=output_cen.getvalue(), file_name=f"Proposta_{cen.replace(' ','_')}_{nome_destino_final}.xlsx", type="primary", use_container_width=True, key=f"dl_prop_{cen}")
+                                st.download_button(f"Baixar Proposta {cen}", data=output_cen.getvalue(), file_name=f"Proposta_{cen.replace(' ','_')}_{nome_destino_final}.xlsx", type="primary", use_container_width=True, key=f"dl_prop_{cen}_{uuid.uuid4().hex}")
 
                         st.divider()
                         
@@ -1444,23 +1444,9 @@ if data_ready:
                                         cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
                                         df_cen_resumo = df_comparativo[cols_resumo].copy()
                                         
-                                        max_cols = max(len(df_cen_resumo.columns), len(df_aud.columns))
-                                        col_names = [f"Col_{i}" for i in range(max_cols)]
-                                        
-                                        df1_headers = pd.DataFrame([{col_names[i]: c for i, c in enumerate(df_cen_resumo.columns)}], columns=col_names)
-                                        df1 = pd.DataFrame(columns=col_names)
-                                        for i, c in enumerate(df_cen_resumo.columns):
-                                            df1[col_names[i]] = df_cen_resumo[c]
-                                            
-                                        empty_rows = pd.DataFrame([[None]*max_cols]*2, columns=col_names)
-                                        
-                                        df2_headers = pd.DataFrame([{col_names[i]: c for i, c in enumerate(df_aud.columns)}], columns=col_names)
-                                        df2 = pd.DataFrame(columns=col_names)
-                                        for i, c in enumerate(df_aud.columns):
-                                            df2[col_names[i]] = df_aud[c]
-                                            
-                                        df_final_aba = pd.concat([df1_headers, df1, empty_rows, df2_headers, df2], ignore_index=True)
-                                        df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
+                                        # Montagem Segura de Duas Tabelas na mesma Aba
+                                        df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
+                                        df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 3, index=False)
                                         
                                 formatar_excel_resumo(writer, cenarios_nomes)
                             
@@ -1470,7 +1456,7 @@ if data_ready:
                                 file_name=f"Resumo_Cenarios_{nome_destino_final.replace(' ', '_')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 type="secondary",
-                                key="dl_resumo_excel"
+                                key=f"dl_resumo_excel_{uuid.uuid4().hex}"
                             )
                                 
                         with col_dl_pdf:
@@ -1495,7 +1481,7 @@ if data_ready:
                                     file_name=f"Relatorio_Executivo_{nome_destino_final.replace(' ', '_')}.pdf",
                                     mime="application/pdf",
                                     type="secondary",
-                                    key="dl_resumo_pdf"
+                                    key=f"dl_resumo_pdf_{uuid.uuid4().hex}"
                                 )
                             else:
                                 st.warning("Instale a biblioteca 'weasyprint' (pip install weasyprint) para liberar a exportação em PDF.")
