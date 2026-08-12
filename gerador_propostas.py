@@ -256,7 +256,7 @@ def formatar_excel_resumo(writer):
         for row in ws.iter_rows():
             ws.row_dimensions[row[0].row].height = 18
             is_header = row[0].row in header_rows
-            is_total = ("Total Geral" in str(row[0].value))
+            is_total = ("Total" in str(row[0].value) or "Total Geral" in str(row[0].value))
 
             for cell in row:
                 if cell.value is None and not is_total:
@@ -406,7 +406,7 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
                             text_color = "#000000"
                             break
                         
-                style_str = f"background-color: {bg_color} !important; color: {text_color} !important; font-weight: {font_weight};"
+                style_str = f"background-color: {bg_color}; color: {text_color}; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color};"
                 html += f"<td style='{style_str}'>{val}</td>"
             html += "</tr>"
         html += "</tbody></table>"
@@ -516,15 +516,6 @@ if file_frete and file_abrangencia and file_volume:
                 
                 add_log("Bases carregadas com sucesso.")
                 
-            # TRAVAS DE SEGURANÇA
-            if 'LMC name' not in df_frete.columns:
-                st.error("🚨 **Arquivo de Frete Incorreto!** Você enviou um arquivo diferente no primeiro campo.")
-                st.stop()
-                
-            if 'Cidade' not in df_abrangencia.columns or 'LMC Name' not in df_abrangencia.columns:
-                st.error("🚨 **Arquivo de Abrangência Incorreto!** Você enviou um arquivo diferente no segundo campo.")
-                st.stop()
-                
             if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
                 st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
                 st.stop()
@@ -608,40 +599,55 @@ if file_frete and file_abrangencia and file_volume:
                 with st.expander("4. Dados Atuais dos Leves Selecionados", expanded=False):
                     
                     st.markdown("### ℹ️ Contexto Atual das Bases Selecionadas")
-                    context_atuais_display = []
+                    
                     for leve in leves_selecionados:
                         vols_leve = df_volume[df_volume['Leve'] == leve]
                         regioes = vols_leve['Região de preço'].dropna().unique()
-                        for reg in regioes:
-                            vols_reg = vols_leve[vols_leve['Região de preço'] == reg]
-                            vol_reg = vols_reg['# Total Packages'].sum()
-                            fat_reg = 0
-                            for _, r in vols_reg.iterrows():
-                                fx = r['Faixa de peso cubado (g)']
-                                qtd = r['# Total Packages']
-                                tb = df_frete_clean[(df_frete_clean['LMC name'] == leve) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
-                                p_on = tb['on time amount'].values[0] if not tb.empty else 0
-                                fat_reg += qtd * p_on
+                        
+                        if len(regioes) > 0:
+                            context_leve_display = []
+                            tot_vol_leve = 0
+                            tot_fat_leve = 0
                             
-                            tb_fx1 = df_frete_clean[(df_frete_clean['LMC name'] == leve) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso cubado (g)'].str.startswith('01'))]
-                            v_fx1 = tb_fx1['on time amount'].values[0] if not tb_fx1.empty else 0
-                            tk_reg = fat_reg / vol_reg if vol_reg > 0 else 0
+                            for reg in regioes:
+                                vols_reg = vols_leve[vols_leve['Região de preço'] == reg]
+                                vol_reg = vols_reg['# Total Packages'].sum()
+                                fat_reg = 0
+                                for _, r in vols_reg.iterrows():
+                                    fx = r['Faixa de peso cubado (g)']
+                                    qtd = r['# Total Packages']
+                                    tb = df_frete_clean[(df_frete_clean['LMC name'] == leve) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso cubado (g)'] == fx)]
+                                    p_on = tb['on time amount'].values[0] if not tb.empty else 0
+                                    fat_reg += qtd * p_on
+                                
+                                tb_fx1 = df_frete_clean[(df_frete_clean['LMC name'] == leve) & (df_frete_clean['label'] == reg) & (df_frete_clean['Faixa de peso cubado (g)'].astype(str).str.startswith('01'))]
+                                v_fx1 = tb_fx1['on time amount'].values[0] if not tb_fx1.empty else 0
+                                tk_reg = fat_reg / vol_reg if vol_reg > 0 else 0
+                                
+                                if vol_reg > 0:
+                                    context_leve_display.append({
+                                        "Região de Preço": reg,
+                                        "Volumetria (30d)": f"{int(vol_reg): ,}".replace(',', '.'),
+                                        "Faturamento Atual": formatar_moeda(fat_reg),
+                                        "Valor 1ª Faixa Atual": formatar_moeda(v_fx1),
+                                        "Ticket Médio Atual": formatar_moeda(tk_reg)
+                                    })
+                                    tot_vol_leve += vol_reg
+                                    tot_fat_leve += fat_reg
                             
-                            if vol_reg > 0:
-                                context_atuais_display.append({
-                                    "Base (LMC)": leve,
-                                    "Região de Preço": reg,
-                                    "Volumetria (30d)": f"{int(vol_reg): ,}".replace(',', '.'),
-                                    "Faturamento Atual": formatar_moeda(fat_reg),
-                                    "Valor 1ª Faixa Atual": formatar_moeda(v_fx1),
-                                    "Ticket Médio Atual": formatar_moeda(tk_reg)
+                            if tot_vol_leve > 0:
+                                context_leve_display.append({
+                                    "Região de Preço": "Total",
+                                    "Volumetria (30d)": f"{int(tot_vol_leve): ,}".replace(',', '.'),
+                                    "Faturamento Atual": formatar_moeda(tot_fat_leve),
+                                    "Valor 1ª Faixa Atual": "-",
+                                    "Ticket Médio Atual": formatar_moeda(tot_fat_leve / tot_vol_leve)
                                 })
-                    
-                    if context_atuais_display:
-                        st.dataframe(pd.DataFrame(context_atuais_display), hide_index=True, use_container_width=True)
-                    else:
-                        st.info("Nenhuma volumetria recente encontrada para as bases selecionadas.")
-                    
+                                st.markdown(f"**Base (LMC):** {leve}")
+                                st.dataframe(pd.DataFrame(context_leve_display), hide_index=True, use_container_width=True)
+                        else:
+                            st.info(f"Nenhuma volumetria recente encontrada para a base: {leve}")
+                            
                     st.divider()
 
                     df_abrangencia.rename(columns={'Região de preço 2023': 'Região de preço'}, inplace=True)
@@ -835,7 +841,6 @@ if file_frete and file_abrangencia and file_volume:
                         tabelas_atuais_pdf = {}
                         cenario_metrics = {}
                         
-                        # CÁLCULO DE CONTEXTO (Seção 8)
                         context_raw = []
                         tot_vol_context = 0
                         tot_fat_context = 0
@@ -1157,7 +1162,6 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"**Faturamento Projetado:** {f_novo}")
                                         st.markdown(f"**Ticket Médio:** {t_novo}")
                                         
-                                        # CONTROLE HTML BLINDADO (Removido st.metric nativo para as variações para evitar bugs de visualização)
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Diferença Mensal</div>", unsafe_allow_html=True)
                                         st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(imp))}</div>", unsafe_allow_html=True)
                                         
@@ -1189,7 +1193,7 @@ if file_frete and file_abrangencia and file_volume:
                                 <style>
                                     .custom-summary-table {{ border-collapse: collapse; margin-bottom: 20px; font-family: 'Inter', sans-serif; font-size: 14px; white-space: nowrap; width: 100%; }}
                                     .custom-summary-table th {{ background-color: #002766 !important; color: #ffffff !important; font-weight: bold; text-align: center; padding: 10px 15px; border: 1px solid #e0e0e0; }}
-                                    .custom-summary-table td {{ padding: 8px 15px; border: 1px solid #e0e0e0; text-align: center; color: black !important; }}
+                                    .custom-summary-table td {{ padding: 8px 15px; border: 1px solid #e0e0e0; text-align: center; color: var(--text-color) !important; }}
                                 </style>
                                 <table class="custom-summary-table"><thead><tr>
                                 """
@@ -1203,13 +1207,14 @@ if file_frete and file_abrangencia and file_volume:
                                     
                                     for col_idx, val in enumerate(row):
                                         col_name = df_disp.columns[col_idx]
-                                        bg_color = "#ffffff"
-                                        text_color = "#333333"
+                                        bg_color = "transparent"
+                                        text_color = "var(--text-color)"
                                         font_weight = "normal"
                                         
                                         for i, cen in enumerate(cenarios_nomes):
                                             if cen in col_name or f"Cenário {i+1}" in col_name:
                                                 bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                                                text_color = "#000000" 
                                                 break
                                         
                                         if is_total:
@@ -1257,7 +1262,6 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
                                     with cl3:
-                                        # CONTROLE HTML BLINDADO DA VISAO LOGGI
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Impacto Financeiro Loggi</div>", unsafe_allow_html=True)
                                         st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(m['imp_loggi']))}</div>", unsafe_allow_html=True)
                                         
@@ -1342,7 +1346,28 @@ if file_frete and file_abrangencia and file_volume:
                                     for cen_name, df_aud in dict_auditorias.items():
                                         if not df_aud.empty:
                                             sn = f"Detalhes {cen_name}"[:31]
-                                            df_aud.to_excel(writer, sheet_name=sn, index=False)
+                                            
+                                            df_cen_resumo = df_comparativo[['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']].copy()
+                                            
+                                            empty_row = pd.DataFrame([[None]*len(df_cen_resumo.columns)], columns=df_cen_resumo.columns)
+                                            df_cen_resumo = pd.concat([df_cen_resumo, empty_row, empty_row], ignore_index=True)
+                                            
+                                            for c in df_aud.columns:
+                                                if c not in df_cen_resumo.columns:
+                                                    df_cen_resumo[c] = None
+                                            
+                                            df_aud_aligned = pd.DataFrame(columns=df_cen_resumo.columns)
+                                            for c in df_aud.columns:
+                                                df_aud_aligned[c] = df_aud[c]
+                                                
+                                            df_aud_aligned.loc[-1] = df_aud.columns
+                                            df_aud_aligned.index = df_aud_aligned.index + 1
+                                            df_aud_aligned = df_aud_aligned.sort_index()
+                                            
+                                            df_final_aba = pd.concat([df_cen_resumo, df_aud_aligned], ignore_index=True)
+                                            
+                                            df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
+                                            
                                     formatar_excel_resumo(writer)
                                 
                                 st.download_button(
