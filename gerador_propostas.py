@@ -159,7 +159,8 @@ def processar_slos_novo(df):
         df_filtered = df[mask_express].copy()
         df_filtered['State'] = df_filtered[col_regiao].astype(str).str.strip().str[:2].str.upper()
         df_filtered['Cidade_str'] = df_filtered[col_cidade].astype(str).str.strip()
-        df_filtered['Chave'] = df_filtered['Cidade_str'].apply(normalize_string) + df_filtered['State'].str.lower()
+        # Forçando lambdas seguras para evitar TypeErrors com dtypes do pandas (Arrow arrays)
+        df_filtered['Chave'] = df_filtered.apply(lambda r: normalize_string(r['Cidade_str']) + str(r['State']).lower(), axis=1)
         df_filtered['SLO'] = pd.to_numeric(df_filtered[col_prazo], errors='coerce')
         df_grouped = df_filtered.groupby(['State', 'Cidade_str', 'Chave'], as_index=False)['SLO'].min()
         df_grouped.rename(columns={'Cidade_str': 'Cidade'}, inplace=True)
@@ -411,18 +412,6 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
         return html
 
     html_content += generate_html_table_styled(df_resumo_html)
-
-    def generate_simple_html_table(df):
-        if df is None or df.empty: return "<p>Sem dados.</p>"
-        html = "<table><thead><tr>"
-        for col in df.columns: html += f"<th>{col}</th>"
-        html += "</tr></thead><tbody>"
-        for _, row in df.iterrows():
-            html += "<tr>"
-            for val in row: html += f"<td>{val}</td>"
-            html += "</tr>"
-        html += "</tbody></table>"
-        return html
 
     for cenario_nome, metricas in cenario_metrics.items():
         html_content += f"""<div class="page-break"></div><h2>DETALHAMENTO: {cenario_nome.upper()}</h2>"""
@@ -805,7 +794,8 @@ if data_ready:
             slo_base_dest = df_slos_clean[df_slos_clean['Chave'] == cidade_base_destino]['SLO'].values
             slo_base_dest_val = slo_base_dest[0] if len(slo_base_dest) > 0 else 0
             
-            df_escopo_final['Chave_Alvo'] = df_escopo_final['Cidade'].apply(normalize_string) + df_escopo_final['State'].astype(str).str.strip().str[:2].str.lower()
+            # GERA A CHAVE PARA O ESCOPO FINAL PARA CRUZAR COM OS SLOS (Protegido contra TypeError usando Apply iterativo)
+            df_escopo_final['Chave_Alvo'] = df_escopo_final.apply(lambda r: normalize_string(r['Cidade']) + (str(r['State']).strip()[:2].lower() if pd.notna(r['State']) else ''), axis=1)
             
             df_escopo_final = df_escopo_final.merge(df_slos_clean[['Chave', 'SLO']], left_on='Chave_Alvo', right_on='Chave', how='left')
             df_escopo_final['Novo SLO Local'] = df_escopo_final['SLO'] - slo_base_dest_val
@@ -909,7 +899,6 @@ if data_ready:
                 tabelas_atuais_pdf = {}
                 cenario_metrics = {}
                 
-                # CÁLCULO DE CONTEXTO (Seção 8)
                 context_raw = []
                 tot_vol_context = 0
                 tot_fat_context = 0
@@ -1443,7 +1432,7 @@ if data_ready:
                                         cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
                                         df_cen_resumo = df_comparativo[cols_resumo].copy()
                                         
-                                        # Monta as tabelas separadas para o Excel sem forçar o concat direto do pandas com colunas incompatíveis
+                                        # Montagem Segura de Duas Tabelas na mesma Aba
                                         df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
                                         df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 3, index=False)
                                         
