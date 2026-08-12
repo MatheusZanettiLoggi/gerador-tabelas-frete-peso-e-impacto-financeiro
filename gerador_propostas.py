@@ -82,7 +82,9 @@ if st.session_state.app_mode == "load":
                     
                 state_dict = json.loads(zip_ref.read("state.json").decode("utf-8"))
                 for k, v in state_dict.items():
-                    st.session_state[k] = v
+                    # Proteção: Ignorar chaves de botões ao recarregar a memória
+                    if not str(k).startswith(("btn_", "dl_")):
+                        st.session_state[k] = v
                     
         st.session_state.app_mode = "run"
         st.rerun()
@@ -892,7 +894,13 @@ if data_ready:
                         st.dataframe(df_exibicao_base, hide_index=True, use_container_width=True)
                     pode_prosseguir = True
 
-            state_json = json.dumps({k: v for k, v in st.session_state.items() if isinstance(v, (int, float, str, bool, list))})
+            keys_to_save = {}
+            for k, v in st.session_state.items():
+                if isinstance(v, (int, float, str, bool, list)):
+                    if not str(k).startswith(("btn_", "dl_")) and k != "FormSubmitter":
+                        keys_to_save[k] = v
+            state_json = json.dumps(keys_to_save)
+            
             zip_data = get_backup_zip_cached(
                 state_json, 
                 st.session_state.df_frete_std.to_csv(index=False), 
@@ -906,7 +914,7 @@ if data_ready:
                 file_name=f"Backup_Analise_Loggi_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
                 mime="application/zip",
                 use_container_width=True,
-                key=f"dl_backup_{uuid.uuid4().hex}"
+                key="dl_backup_sidebar"
             )
             
             # --- PROCESSAMENTO DOS CENÁRIOS E RESULTADOS ---
