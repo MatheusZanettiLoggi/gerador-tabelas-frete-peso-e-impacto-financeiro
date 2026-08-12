@@ -1290,7 +1290,12 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria: {int(m['vol_fat_novo']):,} pacotes</span>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(m['tk_fat_novo'])}</span>", unsafe_allow_html=True)
                                     with cp3:
-                                        st.metric("Crescimento da Operação", formatar_moeda(m['cresc_fat']))
+                                        val_cresc = m['cresc_fat']
+                                        str_cresc = f"+{formatar_moeda(val_cresc)}" if val_cresc > 0 else (f"-{formatar_moeda(abs(val_cresc))}" if val_cresc < 0 else "R$ 0,00")
+                                        
+                                        st.markdown(f"<div style='font-size: 14px; color: gray;'>Crescimento da Operação</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{str_cresc}</div>", unsafe_allow_html=True)
+                                        
                                         if m['perc_cresc'] > 0:
                                             st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▲ +{m['perc_cresc']:.2f}% de aumento no faturamento</span>", unsafe_allow_html=True)
                                         elif m['perc_cresc'] < 0:
@@ -1402,23 +1407,8 @@ if file_frete and file_abrangencia and file_volume:
                                             cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
                                             df_cen_resumo = df_comparativo[cols_resumo].copy()
                                             
-                                            empty_row = pd.DataFrame([[None]*len(df_cen_resumo.columns)], columns=df_cen_resumo.columns)
-                                            df_cen_resumo = pd.concat([df_cen_resumo, empty_row, empty_row], ignore_index=True)
-                                            
-                                            for c in df_aud.columns:
-                                                if c not in df_cen_resumo.columns:
-                                                    df_cen_resumo[c] = None
-                                            
-                                            df_aud_aligned = pd.DataFrame(columns=df_cen_resumo.columns)
-                                            for c in df_aud.columns:
-                                                df_aud_aligned[c] = df_aud[c]
-                                                
-                                            df_aud_aligned.loc[-1] = df_aud.columns
-                                            df_aud_aligned.index = df_aud_aligned.index + 1
-                                            df_aud_aligned = df_aud_aligned.sort_index()
-                                            
-                                            df_final_aba = pd.concat([df_cen_resumo, df_aud_aligned], ignore_index=True)
-                                            df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
+                                            df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
+                                            df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 2, index=False)
                                             
                                     formatar_excel_resumo(writer, cenarios_nomes)
                                 
