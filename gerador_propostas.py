@@ -20,7 +20,7 @@ except ImportError:
 
 st.set_page_config(page_title="Gerador de Propostas - Leves", layout="wide")
 
-# --- INICIALIZAÇÃO DE ESTADOS ---
+# --- INICIALIZAÇÃO DE ESTADOS E CORES ---
 if "app_mode" not in st.session_state:
     st.session_state.app_mode = "start"
 if "num_cenarios" not in st.session_state:
@@ -59,7 +59,7 @@ if st.session_state.app_mode == "start":
                 st.session_state.app_mode = "load"
                 st.rerun()
                 
-    st.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvido por <b>Matheus Zanetti</b> © 2026</small></div>", unsafe_allow_html=True)
+    st.markdown("<br><hr><div style='text-align: center;'><small>Desenvolvido por <b>Matheus Zanetti</b></small></div>", unsafe_allow_html=True)
     st.stop()
 
 # --- TELA DE CARREGAMENTO DE BACKUP ---
@@ -91,7 +91,6 @@ if st.session_state.app_mode == "load":
         st.session_state.app_mode = "start"
         st.rerun()
     st.stop()
-
 
 # --- O CÓDIGO PRINCIPAL CONTINUA AQUI (MODOS 'NEW' E 'RUN') ---
 st.title("📦 Gerador de Propostas e Movimentação de Leves")
@@ -497,20 +496,42 @@ if st.session_state.app_mode == "new":
             st.session_state.app_mode = "start"
             st.rerun()
             
+        with st.expander("1. Upload de Bases de Dados", expanded=True):
+            st.markdown("**Tabelas frete peso praticadas**")
+            st.markdown("[Link Looker: 26300](https://loggi.looker.com/looks/26300)")
+            file_frete = st.file_uploader("Upload Frete Peso", type=["xlsx", "csv"], label_visibility="collapsed")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("**Abrangências atuais**")
+            st.markdown("[Link Looker: 26301](https://loggi.looker.com/looks/26301)")
+            file_abrangencia = st.file_uploader("Upload Abrangência", type=["xlsx", "csv"], label_visibility="collapsed")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("**SLOs globais das cidades**")
+            st.info("Arquivo carregado automaticamente (coverage_spreadsheet_tab_13_2026_04.xlsx)")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("**Volume de pacotes (30 dias)**")
+            st.markdown("[Link Looker: 26302](https://loggi.looker.com/looks/26302)")
+            file_volume = st.file_uploader("Upload Volume", type=["xlsx", "csv"], label_visibility="collapsed")
+            
     if file_frete and file_abrangencia and file_volume:
-        if df_price_var_raw is None or df_slos_raw is None:
-            st.error("Erro: Arquivos de configuração locais (Price variation ou coverage_spreadsheet) não foram encontrados no servidor.")
-            st.stop()
-            
-        with st.spinner("Carregando e processando bases..."):
-            df_frete = load_data(file_frete)
-            df_abrangencia = load_data(file_abrangencia)
-            df_volume = load_data(file_volume)
-            
-            df_frete = padronizar_colunas_frete(df_frete)
-            df_abrangencia = padronizar_colunas_abrangencia(df_abrangencia)
-            df_volume = padronizar_colunas_volume(df_volume)
-            
+        if df_price_var_raw is None:
+            st.error("Erro: O arquivo 'Price variation.xlsx' não foi encontrado. Por favor, certifique-se de que ele foi subido para o repositório do GitHub.")
+        elif df_slos_raw is None:
+            st.error("Erro: O arquivo local 'coverage_spreadsheet_tab_13_2026_04.xlsx' não foi encontrado. Certifique-se de que ele está no repositório do GitHub.")
+        else:
+            with st.spinner("Carregando e processando bases..."):
+                df_frete = load_data(file_frete)
+                df_abrangencia = load_data(file_abrangencia)
+                df_volume = load_data(file_volume)
+                
+                df_frete = padronizar_colunas_frete(df_frete)
+                df_abrangencia = padronizar_colunas_abrangencia(df_abrangencia)
+                df_volume = padronizar_colunas_volume(df_volume)
+                
+                add_log("Bases carregadas com sucesso.")
+                
             if 'LMC name' not in df_frete.columns:
                 st.error("🚨 **Arquivo de Frete Incorreto!** Você enviou um arquivo diferente no primeiro campo.")
                 st.stop()
@@ -524,21 +545,25 @@ if st.session_state.app_mode == "new":
                 st.error("🚨 **Atenção: Base de Volume Desatualizada ou Incorreta!**")
                 st.stop()
                 
-            df_volume['Cidade_Normalizada'] = df_volume['Cidade'].apply(normalize_string)
-            df_abrangencia['Cidade_Normalizada'] = df_abrangencia['Cidade'].apply(normalize_string)
-            
-            st.session_state.df_frete_std = df_frete
-            st.session_state.df_abrangencia_std = df_abrangencia
-            st.session_state.df_volume_std = df_volume
-            data_ready = True
-            
+            with st.spinner("Finalizando processamento..."):
+                df_volume['Cidade_Normalizada'] = df_volume['Cidade'].apply(normalize_string)
+                df_abrangencia['Cidade_Normalizada'] = df_abrangencia['Cidade'].apply(normalize_string)
+                
+                st.session_state.df_frete_std = df_frete
+                st.session_state.df_abrangencia_std = df_abrangencia
+                st.session_state.df_volume_std = df_volume
+                data_ready = True
+    else:
+        st.info("Por favor, faça o upload de **todas as 3 bases** na barra lateral para prosseguir.")
+        
 elif st.session_state.app_mode == "run":
     data_ready = True
     with st.sidebar:
         st.success("✅ Projeto carregado do Backup.")
         st.markdown("<br>", unsafe_allow_html=True)
         if st.button("⬅️ Sair e Voltar ao Início", use_container_width=True):
-            st.session_state.clear()
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.session_state.app_mode = "start"
             st.rerun()
 
@@ -862,7 +887,6 @@ if data_ready:
                         st.dataframe(df_exibicao_base, hide_index=True, use_container_width=True)
                     pode_prosseguir = True
 
-            # GERA O BOTÃO DE DOWNLOAD DO BACKUP AQUI, APÓS TUDO PROCESSADO
             state_json = json.dumps({k: v for k, v in st.session_state.items() if isinstance(v, (int, float, str, bool, list))})
             zip_data = get_backup_zip_cached(
                 state_json, 
@@ -1379,84 +1403,84 @@ if data_ready:
                                 df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
                                 st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
 
-                    st.divider()
-                    
-                    tabelas_atuais_pdf = {}
-                    for leve in leves_selecionados:
-                        df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
-                        df_frete_dl.rename(columns={'label': 'Regiao de Preco', 'on time amount': 'Valor dentro do prazo', 'out of time amount': 'Valor fora do prazo'}, inplace=True)
-                        df_frete_dl['Valor dentro do prazo'] = df_frete_dl['Valor dentro do prazo'].apply(formatar_moeda)
-                        df_frete_dl['Valor fora do prazo'] = df_frete_dl['Valor fora do prazo'].apply(formatar_moeda)
-                        if not df_frete_dl.empty: tabelas_atuais_pdf[leve] = df_frete_dl[['Regiao de Preco', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']]
-                    
-                    st.markdown("### 📥 Downloads das Propostas (Excel)")
-                    st.markdown("Baixe a tabela final e abrangência isoladas para enviar ao Lead.")
-                    cols_dl = st.columns(len(cenarios_nomes))
-                    for idx, cen in enumerate(cenarios_nomes):
-                        with cols_dl[idx]:
-                            output_cen = io.BytesIO()
-                            colunas_finais_abrangencia_excel = [c for c in colunas_finais_abrangencia if c != 'State']
-                            with pd.ExcelWriter(output_cen, engine='openpyxl') as writer:
-                                df_escopo_final[colunas_finais_abrangencia_excel].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
-                                dict_tabelas_finais[cen].to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
-                                formatar_excel_proposta(writer)
-                            st.download_button(f"Baixar Proposta {cen}", data=output_cen.getvalue(), file_name=f"Proposta_{cen.replace(' ','_')}_{nome_destino_final}.xlsx", type="primary", use_container_width=True)
-
-                    st.divider()
-                    
-                    col_dl_res, col_dl_pdf = st.columns(2)
-                    with col_dl_res:
-                        st.markdown("### 📊 Relatório Gerencial (Excel)")
-                        st.markdown("Planilha contendo o Quadro Resumo de todos os cenários e suas respectivas auditorias de cálculo.")
-                        output_res = io.BytesIO()
-                        with pd.ExcelWriter(output_res, engine='openpyxl') as writer:
-                            df_comparativo.to_excel(writer, sheet_name='Resumo de Cenários', index=False)
-                            for cen_idx, cen_name in enumerate(cenarios_nomes):
-                                if cen_name in dict_auditorias and not dict_auditorias[cen_name].empty:
-                                    df_aud = dict_auditorias[cen_name]
-                                    sn = f"Detalhes {cen_name}"[:31]
-                                    
-                                    cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
-                                    df_cen_resumo = df_comparativo[cols_resumo].copy()
-                                    
-                                    # Posiciona as duas tabelas na aba do Excel separadas por um espaço
-                                    df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
-                                    df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 3, index=False)
-                                    
-                            formatar_excel_resumo(writer, cenarios_nomes)
+                        st.divider()
                         
-                        st.download_button(
-                            label="Baixar Resumo de Cenários",
-                            data=output_res.getvalue(),
-                            file_name=f"Resumo_Cenarios_{nome_destino_final.replace(' ', '_')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            type="secondary"
-                        )
+                        tabelas_atuais_pdf = {}
+                        for leve in leves_selecionados:
+                            df_frete_dl = df_frete_clean[df_frete_clean['LMC name'] == leve].copy()
+                            df_frete_dl.rename(columns={'label': 'Regiao de Preco', 'on time amount': 'Valor dentro do prazo', 'out of time amount': 'Valor fora do prazo'}, inplace=True)
+                            df_frete_dl['Valor dentro do prazo'] = df_frete_dl['Valor dentro do prazo'].apply(formatar_moeda)
+                            df_frete_dl['Valor fora do prazo'] = df_frete_dl['Valor fora do prazo'].apply(formatar_moeda)
+                            if not df_frete_dl.empty: tabelas_atuais_pdf[leve] = df_frete_dl[['Regiao de Preco', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']]
+                        
+                        st.markdown("### 📥 Downloads das Propostas (Excel)")
+                        st.markdown("Baixe a tabela final e abrangência isoladas para enviar ao Lead.")
+                        cols_dl = st.columns(len(cenarios_nomes))
+                        for idx, cen in enumerate(cenarios_nomes):
+                            with cols_dl[idx]:
+                                output_cen = io.BytesIO()
+                                colunas_finais_abrangencia_excel = [c for c in colunas_finais_abrangencia if c != 'State']
+                                with pd.ExcelWriter(output_cen, engine='openpyxl') as writer:
+                                    df_escopo_final[colunas_finais_abrangencia_excel].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
+                                    dict_tabelas_finais[cen].to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
+                                    formatar_excel_proposta(writer)
+                                st.download_button(f"Baixar Proposta {cen}", data=output_cen.getvalue(), file_name=f"Proposta_{cen.replace(' ','_')}_{nome_destino_final}.xlsx", type="primary", use_container_width=True)
+
+                        st.divider()
+                        
+                        col_dl_res, col_dl_pdf = st.columns(2)
+                        with col_dl_res:
+                            st.markdown("### 📊 Relatório Gerencial (Excel)")
+                            st.markdown("Planilha contendo o Quadro Resumo de todos os cenários e suas respectivas auditorias de cálculo.")
+                            output_res = io.BytesIO()
+                            with pd.ExcelWriter(output_res, engine='openpyxl') as writer:
+                                df_comparativo.to_excel(writer, sheet_name='Resumo de Cenários', index=False)
+                                for cen_idx, cen_name in enumerate(cenarios_nomes):
+                                    if cen_name in dict_auditorias and not dict_auditorias[cen_name].empty:
+                                        df_aud = dict_auditorias[cen_name]
+                                        sn = f"Detalhes {cen_name}"[:31]
+                                        
+                                        cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
+                                        df_cen_resumo = df_comparativo[cols_resumo].copy()
+                                        
+                                        # Monta as tabelas separadas para o Excel sem forçar o concat direto do pandas com colunas incompatíveis
+                                        df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
+                                        df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 3, index=False)
+                                        
+                                formatar_excel_resumo(writer, cenarios_nomes)
                             
-                    with col_dl_pdf:
-                        st.markdown("### 📄 Relatório Executivo (PDF)")
-                        st.markdown("Apresentação completa com resumo e impacto de cada cenário.")
-                        
-                        if HAS_PDF_GENERATOR:
-                            if not df_movidos.empty:
-                                cidades_movimentadas_str = ", ".join(sorted(df_movidos['Cidade'].str.title().unique().tolist()))
-                            else:
-                                cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
-
-                            pdf_data = generate_html_pdf(
-                                nome_destino_final, estrategia_preco, cidades_movimentadas_str, 
-                                df_comparativo, cenario_metrics, 
-                                df_escopo_final[colunas_finais_abrangencia], 
-                                dict_tabelas_finais, tabelas_atuais_pdf, cenarios_nomes
-                            )
                             st.download_button(
-                                label="Baixar Relatório (PDF)",
-                                data=pdf_data,
-                                file_name=f"Relatorio_Executivo_{nome_destino_final.replace(' ', '_')}.pdf",
-                                mime="application/pdf",
+                                label="Baixar Resumo de Cenários",
+                                data=output_res.getvalue(),
+                                file_name=f"Resumo_Cenarios_{nome_destino_final.replace(' ', '_')}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 type="secondary"
                             )
-                        else:
-                            st.warning("Instale a biblioteca 'weasyprint' (pip install weasyprint) para liberar a exportação em PDF.")
+                                
+                        with col_dl_pdf:
+                            st.markdown("### 📄 Relatório Executivo (PDF)")
+                            st.markdown("Apresentação completa com resumo e impacto de cada cenário.")
+                            
+                            if HAS_PDF_GENERATOR:
+                                if not df_movidos.empty:
+                                    cidades_movimentadas_str = ", ".join(sorted(df_movidos['Cidade'].str.title().unique().tolist()))
+                                else:
+                                    cidades_movimentadas_str = "Nenhum (Apenas reajuste da carteira atual)"
+
+                                pdf_data = generate_html_pdf(
+                                    nome_destino_final, estrategia_preco, cidades_movimentadas_str, 
+                                    df_comparativo, cenario_metrics, 
+                                    df_escopo_final[colunas_finais_abrangencia], 
+                                    dict_tabelas_finais, tabelas_atuais_pdf, cenarios_nomes
+                                )
+                                st.download_button(
+                                    label="Baixar Relatório (PDF)",
+                                    data=pdf_data,
+                                    file_name=f"Relatorio_Executivo_{nome_destino_final.replace(' ', '_')}.pdf",
+                                    mime="application/pdf",
+                                    type="secondary"
+                                )
+                            else:
+                                st.warning("Instale a biblioteca 'weasyprint' (pip install weasyprint) para liberar a exportação em PDF.")
 else:
     st.info("Por favor, faça o upload de **todas as 3 bases** na barra lateral para prosseguir.")
