@@ -217,10 +217,11 @@ def formatar_excel_proposta(writer):
                 except: pass
             ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
 
-def formatar_excel_resumo(writer):
+def formatar_excel_resumo(writer, cenarios_nomes):
     workbook = writer.book
     font_padrao = Font(name='Inter', size=10)
-    font_cabecalho = Font(name='Inter', size=10, bold=True)
+    font_cabecalho = Font(name='Inter', size=10, bold=True, color='FFFFFF')
+    fill_cabecalho = PatternFill(start_color='002766', end_color='002766', fill_type='solid')
     font_destaque_red = Font(name='Inter', size=10, color='9C0006', bold=True)
     fill_red = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
     font_total = Font(name='Inter', size=10, color='FFFFFF', bold=True)
@@ -229,58 +230,76 @@ def formatar_excel_resumo(writer):
     alinhamento = Alignment(horizontal='center', vertical='center', wrap_text=False)
     borda_cinza = Border(left=Side(style='thin', color='D3D3D3'), right=Side(style='thin', color='D3D3D3'), top=Side(style='thin', color='D3D3D3'), bottom=Side(style='thin', color='D3D3D3'))
 
+    CORES_HEX = [c.replace('#', '') for c in CORES_CENARIOS]
+
     for sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
         ws.sheet_view.showGridLines = False
 
-        col_formats = {}
-        cols_impacto = []
-        header_rows = []
-
+        header_map = {} 
+        
         for row in ws.iter_rows():
+            r_idx = row[0].row
             first_val = str(row[0].value).strip() if row[0].value is not None else ""
-            if first_val in ['Região de Preço', 'Tipo', 'Regiao de Preco']:
-                header_rows.append(row[0].row)
-                for cell in row:
-                    val_str = str(cell.value).lower()
-                    if any(x in val_str for x in ['fat', 'ticket', 'tk', 'impacto', 'atual', '(r$)', 'tarifa', 'custo', 'diferença', 'projetado']):
-                        if "volumetria" not in val_str and "pacotes" not in val_str:
-                            col_formats[cell.column_letter] = '"R$" #,##0.00'
-                        if "impacto" in val_str: cols_impacto.append(cell.column_letter)
-                    elif "%" in val_str or "aum" in val_str:
-                        col_formats[cell.column_letter] = '0.00%'
-                        cols_impacto.append(cell.column_letter)
-                    elif "volumetria" in val_str or "volume" in val_str or "pacotes" in val_str:
-                        col_formats[cell.column_letter] = '#,##0'
+            
+            is_header = (first_val in ['Região de Preço', 'Cenário'])
+            is_total = ("Total" in first_val or "Total Geral" in first_val)
+            
+            if is_header:
+                header_map[r_idx] = {cell.column: str(cell.value) for cell in row}
 
-        for row in ws.iter_rows():
-            ws.row_dimensions[row[0].row].height = 18
-            is_header = row[0].row in header_rows
-            is_total = ("Total" in str(row[0].value) or "Total Geral" in str(row[0].value))
+            current_header_row = 1
+            for h_r in sorted(header_map.keys(), reverse=True):
+                if r_idx >= h_r:
+                    current_header_row = h_r
+                    break
 
             for cell in row:
-                if cell.value is None and not is_total:
+                if cell.value is None:
                     continue
                     
-                cell.alignment = alinhamento
-                if cell.value is not None:
-                    cell.border = borda_cinza
+                c_idx = cell.column
+                col_name = header_map.get(current_header_row, {}).get(c_idx, "")
+                col_name_lower = col_name.lower()
                 
-                if cell.column_letter in col_formats and isinstance(cell.value, (int, float)):
-                    cell.number_format = col_formats[cell.column_letter]
+                cell.alignment = alinhamento
+                cell.border = borda_cinza
+                
+                if any(x in col_name_lower for x in ['fat', 'ticket', 'tk', 'impacto', 'atual', '(r$)', 'tarifa', 'custo', 'diferença', 'projetado']):
+                    if "volumetria" not in col_name_lower and "pacotes" not in col_name_lower:
+                        cell.number_format = '"R$" #,##0.00'
+                if "%" in col_name_lower or "aum" in col_name_lower or "comercial" in col_name_lower:
+                    cell.number_format = '0.00%'
+                if "volumetria" in col_name_lower or "volume" in col_name_lower or "pacotes" in col_name_lower:
+                    cell.number_format = '#,##0'
+
+                cell.font = font_padrao
 
                 if is_header:
-                    cell.font = font_cabecalho
-                elif is_total and cell.value is not None:
-                    if cell.column_letter in cols_impacto:
+                    bg_applied = False
+                    for i, cen in enumerate(cenarios_nomes):
+                        if cen in col_name or f"Cenário {i+1}" in col_name:
+                            cell.fill = PatternFill(start_color=CORES_HEX[i % len(CORES_HEX)], end_color=CORES_HEX[i % len(CORES_HEX)], fill_type='solid')
+                            cell.font = Font(name='Inter', size=10, bold=True, color='000000')
+                            bg_applied = True
+                            break
+                    if not bg_applied:
+                        cell.fill = fill_cabecalho
+                        cell.font = font_cabecalho
+                        
+                elif is_total:
+                    if "impacto" in col_name_lower or "aum" in col_name_lower:
                         cell.font = font_destaque_red
                         cell.fill = fill_red
                     else:
                         cell.font = font_total
                         cell.fill = fill_total
                 else:
-                    if cell.value is not None:
-                        cell.font = font_padrao
+                    if sheet_name == 'Resumo de Cenários' or r_idx < 10:
+                        for i, cen in enumerate(cenarios_nomes):
+                            if cen in col_name or f"Cenário {i+1}" in col_name:
+                                cell.fill = PatternFill(start_color=CORES_HEX[i % len(CORES_HEX)], end_color=CORES_HEX[i % len(CORES_HEX)], fill_type='solid')
+                                break
 
         for col in ws.columns:
             max_length = 0
@@ -298,13 +317,19 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
 
     def format_money(val): return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     def format_perc(val): return f"{val:+.2f}%"
+    
     def get_indicator(val, is_cost=False):
-        if val > 0: return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">▲ +{format_money(val)}</span>'
-        elif val < 0: return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">▼ -{format_money(abs(val))}</span>'
+        if val > 0: 
+            return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">▲ +{format_money(val)}</span>'
+        elif val < 0: 
+            return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">▼ -{format_money(abs(val))}</span>'
         return f'<span class="arrow-neutral">■ R$ 0,00</span>'
+        
     def get_perc_indicator(val, is_cost=False):
-        if val > 0: return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">(+{format_perc(val)})</span>'
-        elif val < 0: return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">({format_perc(val)})</span>'
+        if val > 0: 
+            return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">(+{format_perc(val)})</span>'
+        elif val < 0: 
+            return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">({format_perc(val)})</span>'
         return f'<span class="arrow-neutral">(0.00%)</span>'
 
     logo_html = ""
@@ -515,6 +540,14 @@ if file_frete and file_abrangencia and file_volume:
                 df_volume = padronizar_colunas_volume(df_volume)
                 
                 add_log("Bases carregadas com sucesso.")
+                
+            if 'LMC name' not in df_frete.columns:
+                st.error("🚨 **Arquivo de Frete Incorreto!** Você enviou um arquivo diferente no primeiro campo.")
+                st.stop()
+                
+            if 'Cidade' not in df_abrangencia.columns or 'LMC Name' not in df_abrangencia.columns:
+                st.error("🚨 **Arquivo de Abrangência Incorreto!** Você enviou um arquivo diferente no segundo campo.")
+                st.stop()
                 
             if 'Leve' not in df_volume.columns or 'Routing Code' not in df_volume.columns:
                 st.error("🚨 **Colunas básicas ausentes no arquivo de Volume!**")
@@ -1162,8 +1195,11 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"**Faturamento Projetado:** {f_novo}")
                                         st.markdown(f"**Ticket Médio:** {t_novo}")
                                         
+                                        # CONTROLE HTML BLINDADO (Removido st.metric nativo para as variações para evitar bugs de visualização)
                                         st.markdown(f"<div style='font-size: 14px; color: gray;'>Diferença Mensal</div>", unsafe_allow_html=True)
-                                        st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(imp))}</div>", unsafe_allow_html=True)
+                                        
+                                        val_imp_str = f"+{formatar_moeda(imp)}" if imp > 0 else (f"-{formatar_moeda(abs(imp))}" if imp < 0 else "R$ 0,00")
+                                        st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{val_imp_str}</div>", unsafe_allow_html=True)
                                         
                                         if imp > 0:
                                             st.markdown(f"<div style='color: #ff4b4b; background-color: #ffcccc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold;'>▲ +{formatar_moeda(imp)} (Aumento de Custo)</div>", unsafe_allow_html=True)
@@ -1248,8 +1284,14 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio: {formatar_moeda(m['tk_fat_novo'])}</span>", unsafe_allow_html=True)
                                     with cp3:
                                         st.metric("Crescimento da Operação", formatar_moeda(m['cresc_fat']))
-                                        st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▲ +{m['perc_cresc']:.2f}% de aumento no faturamento</span>", unsafe_allow_html=True)
-    
+                                        # LÓGICA DE COR DO PARCEIRO CORRIGIDA (▲ Verde pra aumento, ▼ Vermelho pra perda)
+                                        if m['perc_cresc'] > 0:
+                                            st.markdown(f"<span style='font-size: 0.9em; color: #09ab3b; font-weight: bold;'>▲ +{m['perc_cresc']:.2f}% de aumento no faturamento</span>", unsafe_allow_html=True)
+                                        elif m['perc_cresc'] < 0:
+                                            st.markdown(f"<span style='font-size: 0.9em; color: #ff4b4b; font-weight: bold;'>▼ {m['perc_cresc']:.2f}% de perda de faturamento</span>", unsafe_allow_html=True)
+                                        else:
+                                            st.markdown(f"<span style='font-size: 0.9em; color: gray; font-weight: bold;'>■ 0.00% (Sem alteração)</span>", unsafe_allow_html=True)
+                                        
                                     st.divider()
                                     st.subheader(f"📉 Visão Loggi ({cen})")
                                     cl1, cl2, cl3 = st.columns(3)
@@ -1262,14 +1304,18 @@ if file_frete and file_abrangencia and file_volume:
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Volumetria Total: {int(m['vol_loggi']):,} pacotes</span>", unsafe_allow_html=True)
                                         st.markdown(f"<span style='font-size: 0.9em; color: gray;'>Ticket Médio Novo: {formatar_moeda(m['tk_loggi_novo'])}</span>", unsafe_allow_html=True)
                                     with cl3:
-                                        st.markdown(f"<div style='font-size: 14px; color: gray;'>Impacto Financeiro Loggi</div>", unsafe_allow_html=True)
-                                        st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{formatar_moeda(abs(m['imp_loggi']))}</div>", unsafe_allow_html=True)
+                                        # CONTROLE HTML BLINDADO DA VISAO LOGGI (Com sinal negativo visível no R$)
+                                        val_imp = m['imp_loggi']
+                                        str_imp = f"+{formatar_moeda(val_imp)}" if val_imp > 0 else (f"-{formatar_moeda(abs(val_imp))}" if val_imp < 0 else "R$ 0,00")
                                         
-                                        if m['imp_loggi'] > 0:
-                                            st.markdown(f"<div style='color: #ff4b4b; background-color: #ffcccc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>▲ +{formatar_moeda(m['imp_loggi'])} (Aumento de Custo)</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='font-size: 14px; color: gray;'>Impacto Financeiro Loggi</div>", unsafe_allow_html=True)
+                                        st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{str_imp}</div>", unsafe_allow_html=True)
+                                        
+                                        if val_imp > 0:
+                                            st.markdown(f"<div style='color: #ff4b4b; background-color: #ffcccc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>▲ +{formatar_moeda(val_imp)} (Aumento de Custo)</div>", unsafe_allow_html=True)
                                             st.markdown(f"**% Aumento:** <span style='color:#ff4b4b'>▲ +{m['perc_imp_loggi']:.2f}% de impacto no budget</span>", unsafe_allow_html=True)
-                                        elif m['imp_loggi'] < 0:
-                                            st.markdown(f"<div style='color: #09ab3b; background-color: #ccffcc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>▼ -{formatar_moeda(abs(m['imp_loggi']))} (Economia)</div>", unsafe_allow_html=True)
+                                        elif val_imp < 0:
+                                            st.markdown(f"<div style='color: #09ab3b; background-color: #ccffcc; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>▼ -{formatar_moeda(abs(val_imp))} (Economia)</div>", unsafe_allow_html=True)
                                             st.markdown(f"**% Aumento:** <span style='color:#09ab3b'>▼ {m['perc_imp_loggi']:.2f}% de economia no budget</span>", unsafe_allow_html=True)
                                         else:
                                             st.markdown(f"<div style='color: gray; background-color: #f0f0f0; display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.9em; font-weight: bold; margin-bottom: 10px;'>■ R$ 0,00 (Neutro)</div>", unsafe_allow_html=True)
@@ -1347,28 +1393,14 @@ if file_frete and file_abrangencia and file_volume:
                                         if not df_aud.empty:
                                             sn = f"Detalhes {cen_name}"[:31]
                                             
-                                            df_cen_resumo = df_comparativo[['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']].copy()
+                                            # INSERE O NOVO MINI RESUMO POR CENÁRIO NA ABA DE DETALHE
+                                            cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
+                                            df_cen_resumo = df_comparativo[cols_resumo].copy()
                                             
-                                            empty_row = pd.DataFrame([[None]*len(df_cen_resumo.columns)], columns=df_cen_resumo.columns)
-                                            df_cen_resumo = pd.concat([df_cen_resumo, empty_row, empty_row], ignore_index=True)
+                                            df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
+                                            df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 2, index=False)
                                             
-                                            for c in df_aud.columns:
-                                                if c not in df_cen_resumo.columns:
-                                                    df_cen_resumo[c] = None
-                                            
-                                            df_aud_aligned = pd.DataFrame(columns=df_cen_resumo.columns)
-                                            for c in df_aud.columns:
-                                                df_aud_aligned[c] = df_aud[c]
-                                                
-                                            df_aud_aligned.loc[-1] = df_aud.columns
-                                            df_aud_aligned.index = df_aud_aligned.index + 1
-                                            df_aud_aligned = df_aud_aligned.sort_index()
-                                            
-                                            df_final_aba = pd.concat([df_cen_resumo, df_aud_aligned], ignore_index=True)
-                                            
-                                            df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
-                                            
-                                    formatar_excel_resumo(writer)
+                                    formatar_excel_resumo(writer, cenarios_nomes)
                                 
                                 st.download_button(
                                     label="Baixar Resumo de Cenários",
