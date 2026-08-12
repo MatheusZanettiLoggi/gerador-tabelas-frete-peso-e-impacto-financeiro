@@ -1444,9 +1444,23 @@ if data_ready:
                                         cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
                                         df_cen_resumo = df_comparativo[cols_resumo].copy()
                                         
-                                        # Montagem Segura de Duas Tabelas na mesma Aba
-                                        df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
-                                        df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 3, index=False)
+                                        max_cols = max(len(df_cen_resumo.columns), len(df_aud.columns))
+                                        col_names = [f"Col_{i}" for i in range(max_cols)]
+                                        
+                                        df1_headers = pd.DataFrame([{col_names[i]: c for i, c in enumerate(df_cen_resumo.columns)}], columns=col_names)
+                                        df1 = pd.DataFrame(columns=col_names)
+                                        for i, c in enumerate(df_cen_resumo.columns):
+                                            df1[col_names[i]] = df_cen_resumo[c]
+                                            
+                                        empty_rows = pd.DataFrame([[None]*max_cols]*2, columns=col_names)
+                                        
+                                        df2_headers = pd.DataFrame([{col_names[i]: c for i, c in enumerate(df_aud.columns)}], columns=col_names)
+                                        df2 = pd.DataFrame(columns=col_names)
+                                        for i, c in enumerate(df_aud.columns):
+                                            df2[col_names[i]] = df_aud[c]
+                                            
+                                        df_final_aba = pd.concat([df1_headers, df1, empty_rows, df2_headers, df2], ignore_index=True)
+                                        df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
                                         
                                 formatar_excel_resumo(writer, cenarios_nomes)
                             
