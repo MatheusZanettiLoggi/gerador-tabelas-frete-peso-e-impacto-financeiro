@@ -297,72 +297,16 @@ def formatar_excel_resumo(writer, cenarios_nomes):
                 except: pass
             ws.column_dimensions[column].width = max((max_length + 2) * 1.15, 12)
 
-# --- FUNÇÕES GLOBAIS DE CONSTRUÇÃO DE HTML PARA PDF ---
-def generate_html_table_styled(df, cenarios_nomes):
-    if df is None or df.empty: return "<p>Sem dados.</p>"
-    html = "<table><thead><tr>"
-    for col in df.columns:
-        bg_color = "#002766" 
-        text_color = "#ffffff"
-        for i, cen in enumerate(cenarios_nomes):
-            if cen in col or f"Cenário {i+1}" in col:
-                bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
-                text_color = "#000000"
-                break
-        html += f"<th style='background-color: {bg_color} !important; color: {text_color} !important;'>{col}</th>"
-    html += "</tr></thead><tbody>"
-    for _, row in df.iterrows():
-        is_total = str(row.iloc[0]).lower() == 'total geral'
-        html += "<tr>"
-        for col_idx, val in enumerate(row):
-            col_name = df.columns[col_idx]
-            bg_color = "#ffffff"
-            text_color = "#333333"
-            font_weight = "normal"
-            if is_total:
-                font_weight = "bold"
-                if "Impacto" in col_name or "% Aum" in col_name:
-                    bg_color = "#ffc7ce"
-                    text_color = "#9c0006"
-                else:
-                    bg_color = "#002766"
-                    text_color = "#ffffff"
-            else:
-                for i, cen in enumerate(cenarios_nomes):
-                    if cen in col_name or f"Cenário {i+1}" in col_name:
-                        bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
-                        text_color = "#000000"
-                        break
-            style_str = f"background-color: {bg_color}; color: {text_color}; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color};"
-            html += f"<td style='{style_str}'>{val}</td>"
-        html += "</tr>"
-    html += "</tbody></table>"
-    return html
-
-def generate_simple_html_table(df):
-    if df is None or df.empty: return "<p>Sem dados.</p>"
-    html = "<table><thead><tr>"
-    for col in df.columns: html += f"<th>{col}</th>"
-    html += "</tr></thead><tbody>"
-    for _, row in df.iterrows():
-        html += "<tr>"
-        for val in row: html += f"<td>{val}</td>"
-        html += "</tr>"
-    html += "</tbody></table>"
-    return html
-
+# --- GERADOR DE PDF ---
 def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_comparativo, cenario_metrics, df_abrangencia_out, dict_tabelas_out, tabelas_atuais_pdf, cenarios_nomes):
     fuso_brasilia = datetime.now(timezone(timedelta(hours=-3)))
     data_extracao = fuso_brasilia.strftime("%d/%m/%Y às %H:%M")
-    
     def format_money(val): return f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     def format_perc(val): return f"{val:+.2f}%"
-    
     def get_indicator(val, is_cost=False):
         if val > 0: return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">▲ +{format_money(val)}</span>'
         elif val < 0: return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">▼ -{format_money(abs(val))}</span>'
         return f'<span class="arrow-neutral">■ R$ 0,00</span>'
-        
     def get_perc_indicator(val, is_cost=False):
         if val > 0: return f'<span class="{"arrow-up-red" if is_cost else "arrow-up-green"}">(+{format_perc(val)})</span>'
         elif val < 0: return f'<span class="{"arrow-down-green" if is_cost else "arrow-down-red"}">({format_perc(val)})</span>'
@@ -426,7 +370,60 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
         elif "%" in c or "Aum" in c: df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_perc(x * 100) if pd.notna(x) and isinstance(x, (int, float)) else x)
         elif "Vol" in c: df_resumo_html[c] = df_resumo_html[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
 
-    html_content += generate_html_table_styled(df_resumo_html, cenarios_nomes)
+    def generate_html_table_styled(df):
+        if df is None or df.empty: return "<p>Sem dados.</p>"
+        html = "<table><thead><tr>"
+        for col in df.columns:
+            bg_color = "#002766" 
+            text_color = "#ffffff"
+            for i, cen in enumerate(cenarios_nomes):
+                if cen in col or f"Cenário {i+1}" in col:
+                    bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                    text_color = "#000000"
+                    break
+            html += f"<th style='background-color: {bg_color} !important; color: {text_color} !important;'>{col}</th>"
+        html += "</tr></thead><tbody>"
+        for _, row in df.iterrows():
+            is_total = str(row.iloc[0]).lower() == 'total geral'
+            html += "<tr>"
+            for col_idx, val in enumerate(row):
+                col_name = df.columns[col_idx]
+                bg_color = "#ffffff"
+                text_color = "#333333"
+                font_weight = "normal"
+                if is_total:
+                    font_weight = "bold"
+                    if "Impacto" in col_name or "% Aum" in col_name:
+                        bg_color = "#ffc7ce"
+                        text_color = "#9c0006"
+                    else:
+                        bg_color = "#002766"
+                        text_color = "#ffffff"
+                else:
+                    for i, cen in enumerate(cenarios_nomes):
+                        if cen in col_name or f"Cenário {i+1}" in col_name:
+                            bg_color = CORES_CENARIOS[i % len(CORES_CENARIOS)]
+                            text_color = "#000000"
+                            break
+                style_str = f"background-color: {bg_color}; color: {text_color}; font-weight: {font_weight};" if bg_color or is_total else f"color: {text_color};"
+                html += f"<td style='{style_str}'>{val}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+        return html
+
+    html_content += generate_html_table_styled(df_resumo_html)
+
+    def generate_simple_html_table(df):
+        if df is None or df.empty: return "<p>Sem dados.</p>"
+        html = "<table><thead><tr>"
+        for col in df.columns: html += f"<th>{col}</th>"
+        html += "</tr></thead><tbody>"
+        for _, row in df.iterrows():
+            html += "<tr>"
+            for val in row: html += f"<td>{val}</td>"
+            html += "</tr>"
+        html += "</tbody></table>"
+        return html
 
     for cenario_nome, metricas in cenario_metrics.items():
         html_content += f"""<div class="page-break"></div><h2>DETALHAMENTO: {cenario_nome.upper()}</h2>"""
@@ -904,7 +901,8 @@ if data_ready:
                 data=zip_data,
                 file_name=f"Backup_Analise_Loggi_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
                 mime="application/zip",
-                use_container_width=True
+                use_container_width=True,
+                key="dl_backup"
             )
             
             # --- PROCESSAMENTO DOS CENÁRIOS E RESULTADOS ---
@@ -1427,7 +1425,7 @@ if data_ready:
                                     df_escopo_final[colunas_finais_abrangencia_excel].to_excel(writer, sheet_name='Abrangência e Prazos', index=False)
                                     dict_tabelas_finais[cen].to_excel(writer, sheet_name='Tabela Frete Peso', index=False)
                                     formatar_excel_proposta(writer)
-                                st.download_button(f"Baixar Proposta {cen}", data=output_cen.getvalue(), file_name=f"Proposta_{cen.replace(' ','_')}_{nome_destino_final}.xlsx", type="primary", use_container_width=True)
+                                st.download_button(f"Baixar Proposta {cen}", data=output_cen.getvalue(), file_name=f"Proposta_{cen.replace(' ','_')}_{nome_destino_final}.xlsx", type="primary", use_container_width=True, key=f"dl_prop_{cen}")
 
                         st.divider()
                         
@@ -1446,12 +1444,23 @@ if data_ready:
                                         cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
                                         df_cen_resumo = df_comparativo[cols_resumo].copy()
                                         
-                                        # Empilhamento posicional de tabelas no pandas 3.0+
-                                        empty_row = pd.DataFrame([[None]*len(df_cen_resumo.columns)], columns=df_cen_resumo.columns)
-                                        df_cen_resumo = pd.concat([df_cen_resumo, empty_row, empty_row], ignore_index=True)
+                                        max_cols = max(len(df_cen_resumo.columns), len(df_aud.columns))
+                                        col_names = [f"Col_{i}" for i in range(max_cols)]
                                         
-                                        df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
-                                        df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo), index=False)
+                                        df1_headers = pd.DataFrame([{col_names[i]: c for i, c in enumerate(df_cen_resumo.columns)}], columns=col_names)
+                                        df1 = pd.DataFrame(columns=col_names)
+                                        for i, c in enumerate(df_cen_resumo.columns):
+                                            df1[col_names[i]] = df_cen_resumo[c]
+                                            
+                                        empty_rows = pd.DataFrame([[None]*max_cols]*2, columns=col_names)
+                                        
+                                        df2_headers = pd.DataFrame([{col_names[i]: c for i, c in enumerate(df_aud.columns)}], columns=col_names)
+                                        df2 = pd.DataFrame(columns=col_names)
+                                        for i, c in enumerate(df_aud.columns):
+                                            df2[col_names[i]] = df_aud[c]
+                                            
+                                        df_final_aba = pd.concat([df1_headers, df1, empty_rows, df2_headers, df2], ignore_index=True)
+                                        df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
                                         
                                 formatar_excel_resumo(writer, cenarios_nomes)
                             
@@ -1460,7 +1469,8 @@ if data_ready:
                                 data=output_res.getvalue(),
                                 file_name=f"Resumo_Cenarios_{nome_destino_final.replace(' ', '_')}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                type="secondary"
+                                type="secondary",
+                                key="dl_resumo_excel"
                             )
                                 
                         with col_dl_pdf:
@@ -1484,7 +1494,8 @@ if data_ready:
                                     data=pdf_data,
                                     file_name=f"Relatorio_Executivo_{nome_destino_final.replace(' ', '_')}.pdf",
                                     mime="application/pdf",
-                                    type="secondary"
+                                    type="secondary",
+                                    key="dl_resumo_pdf"
                                 )
                             else:
                                 st.warning("Instale a biblioteca 'weasyprint' (pip install weasyprint) para liberar a exportação em PDF.")
