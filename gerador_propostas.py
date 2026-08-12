@@ -571,6 +571,7 @@ if file_frete and file_abrangencia and file_volume:
                 
                 df_volume['Faixa de peso cubado (g)'] = df_volume['Faixa de peso cubado (g)'].astype(str).str.strip()
                 
+                # AGRUPAMENTO COM A REGIÃO DO VOLUME (Para garantir faturamento real exato)
                 df_volume_grouped = df_volume.groupby(
                     ['Leve', 'Cidade_Normalizada', 'Região de preço', 'Faixa de peso cubado (g)'],
                     as_index=False
@@ -842,7 +843,8 @@ if file_frete and file_abrangencia and file_volume:
                         
                         df_regiao_base['Região de Preço'] = reg
                         df_regiao_base['Valor dentro do prazo'] = df_regiao_base['Multiplicador'] * base_on
-                        df_regiao_base['Valor fora do prazo'] = df_regiao_base['Multiplicador'] * base_on
+                        # CORREÇÃO AQUI: Aplica 65% para Tabela Base
+                        df_regiao_base['Valor fora do prazo'] = df_regiao_base['Multiplicador'] * base_on * 0.65
                         df_tabelas_base_list.append(df_regiao_base[['Região de Preço', 'Faixa de peso cubado (g)', 'Valor dentro do prazo', 'Valor fora do prazo']])
     
                     df_tabela_base_completa = pd.DataFrame()
@@ -1019,7 +1021,8 @@ if file_frete and file_abrangencia and file_volume:
                                     
                                     df_regiao_tabela['Região de Preço'] = regiao
                                     df_regiao_tabela['Valor dentro do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
-                                    df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_on
+                                    # CORREÇÃO AQUI: Aplica 65% para os cenários também
+                                    df_regiao_tabela['Valor fora do prazo'] = df_regiao_tabela['Multiplicador'] * base_on * 0.65
                                     
                                     ajuste_tipo = st.session_state.get(f"tipo_{cen_id}_{regiao}", "%")
                                     ajuste_val = st.session_state.get(f"val_{cen_id}_{regiao}", 0.0)
@@ -1407,8 +1410,23 @@ if file_frete and file_abrangencia and file_volume:
                                             cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
                                             df_cen_resumo = df_comparativo[cols_resumo].copy()
                                             
-                                            df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
-                                            df_aud.to_excel(writer, sheet_name=sn, startrow=len(df_cen_resumo) + 2, index=False)
+                                            empty_row = pd.DataFrame([[None]*len(df_cen_resumo.columns)], columns=df_cen_resumo.columns)
+                                            df_cen_resumo = pd.concat([df_cen_resumo, empty_row, empty_row], ignore_index=True)
+                                            
+                                            for c in df_aud.columns:
+                                                if c not in df_cen_resumo.columns:
+                                                    df_cen_resumo[c] = None
+                                            
+                                            df_aud_aligned = pd.DataFrame(columns=df_cen_resumo.columns)
+                                            for c in df_aud.columns:
+                                                df_aud_aligned[c] = df_aud[c]
+                                                
+                                            df_aud_aligned.loc[-1] = df_aud.columns
+                                            df_aud_aligned.index = df_aud_aligned.index + 1
+                                            df_aud_aligned = df_aud_aligned.sort_index()
+                                            
+                                            df_final_aba = pd.concat([df_cen_resumo, df_aud_aligned], ignore_index=True)
+                                            df_final_aba.to_excel(writer, sheet_name=sn, index=False, header=False)
                                             
                                     formatar_excel_resumo(writer, cenarios_nomes)
                                 
