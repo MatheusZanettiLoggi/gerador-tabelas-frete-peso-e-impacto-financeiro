@@ -822,7 +822,8 @@ if data_ready:
 
                 opcoes_destino = ["Manter no Leve Atual", nome_destino_final]
                 st.markdown("⚡ **Ações em Massa**")
-                col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns([2.5, 2.5, 2.5, 1.5, 1.5])
+                
+                col_m1, col_m2, col_m3 = st.columns([1, 1, 1.5])
                 with col_m1: bulk_lmc = st.selectbox("1. Filtrar Origem:", ["Selecione...", "Todos os Leves"] + leves_selecionados, key="bulk_lmc")
                 with col_m2:
                     opcoes_reg = ["Todas as Regiões"]
@@ -830,18 +831,30 @@ if data_ready:
                         if bulk_lmc == "Todos os Leves": opcoes_reg += sorted(list(st.session_state.df_movimentacao['Região de preço'].unique()))
                         else: opcoes_reg += sorted(list(st.session_state.df_movimentacao[st.session_state.df_movimentacao['LMC Name'] == bulk_lmc]['Região de preço'].unique()))
                     bulk_reg = st.selectbox("2. Filtrar Região:", opcoes_reg, key="bulk_reg")
-                with col_m3: bulk_dest = st.selectbox("3. Escolher Destino:", opcoes_destino, key="bulk_dest")
-                with col_m4:
+                
+                cidades_disponiveis = []
+                if bulk_lmc != "Selecione...":
+                    mask_cid = pd.Series([True]*len(st.session_state.df_movimentacao), index=st.session_state.df_movimentacao.index)
+                    if bulk_lmc != "Todos os Leves": mask_cid &= st.session_state.df_movimentacao['LMC Name'] == bulk_lmc
+                    if bulk_reg != "Todas as Regiões": mask_cid &= st.session_state.df_movimentacao['Região de preço'] == bulk_reg
+                    cidades_disponiveis = sorted(list(st.session_state.df_movimentacao.loc[mask_cid, 'Cidade'].unique()))
+                
+                with col_m3: bulk_cidades = st.multiselect("3. Filtrar Cidades (Opcional):", cidades_disponiveis, key="bulk_cidades")
+
+                col_m4, col_m5, col_m6 = st.columns([1.5, 1, 1])
+                with col_m4: bulk_dest = st.selectbox("4. Escolher Destino:", opcoes_destino, key="bulk_dest")
+                with col_m5:
                     st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
                     def aplicar_em_massa():
-                        l, r, d = st.session_state.bulk_lmc, st.session_state.bulk_reg, st.session_state.bulk_dest
+                        l, r, d, c = st.session_state.bulk_lmc, st.session_state.bulk_reg, st.session_state.bulk_dest, st.session_state.bulk_cidades
                         if l != "Selecione...":
                             if l == "Todos os Leves": mask = pd.Series([True]*len(st.session_state.df_movimentacao), index=st.session_state.df_movimentacao.index)
                             else: mask = st.session_state.df_movimentacao['LMC Name'] == l
                             if r != "Todas as Regiões": mask &= st.session_state.df_movimentacao['Região de preço'] == r
+                            if c: mask &= st.session_state.df_movimentacao['Cidade'].isin(c)
                             st.session_state.df_movimentacao.loc[mask, 'Destino'] = d
                     st.button("Aplicar Ação", on_click=aplicar_em_massa, use_container_width=True)
-                with col_m5:
+                with col_m6:
                     st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
                     st.button("🔄 Resetar", on_click=lambda: st.session_state.df_movimentacao.assign(Destino="Manter no Leve Atual"), use_container_width=True)
 
@@ -873,9 +886,17 @@ if data_ready:
             colunas_finais_abrangencia = ['Cidade', 'State', 'Região de preço', 'Novo SLO Local', 'Observação']
             
             regioes_finais_destino = sorted(df_escopo_final['Região de preço'].unique().tolist())
-            leves_para_volume = list(set(leves_selecionados + ([nome_destino_final] if tipo_destino == "Um Leve Existente (já selecionado)" else [])))
             
-            df_volume_alvo_raw = df_volume_grouped_raw[df_volume_grouped_raw['Leve'].isin(leves_para_volume)].copy()
+            # --- NOVA LÓGICA DE ESCOPO DE VOLUME (Apenas Municípios Movimentados) ---
+            df_abrangencia_existente_pairs = df_abrangencia_existente[['LMC Name', 'Cidade']].rename(columns={'LMC Name': 'Leve'})
+            df_movidos_pairs = df_movidos[['LMC Name', 'Cidade']].rename(columns={'LMC Name': 'Leve'})
+            
+            df_valid_scope = pd.concat([df_abrangencia_existente_pairs, df_movidos_pairs], ignore_index=True)
+            df_valid_scope['Cidade_Normalizada'] = df_valid_scope['Cidade'].apply(normalize_string)
+            df_valid_scope = df_valid_scope[['Leve', 'Cidade_Normalizada']].drop_duplicates()
+            
+            # Cruza a volumetria bruta para conter APENAS os municípios exatos do escopo destino
+            df_volume_alvo_raw = df_volume_grouped_raw.merge(df_valid_scope, on=['Leve', 'Cidade_Normalizada'], how='inner')
 
             df_tabelas_base_list = []
             dict_base_on = {}
@@ -1508,7 +1529,6 @@ if data_ready:
                                 df_exibicao_tabela['Valor fora do prazo'] = df_exibicao_tabela['Valor fora do prazo'].apply(formatar_moeda)
                                 st.dataframe(df_exibicao_tabela, hide_index=True, use_container_width=True)
 
-                    # ----- AQUI COMEÇA O BLOCO DE DOWNLOAD QUE FOI RETIRADO DE DENTRO DO LAÇO DE ABAS -----
                     st.divider()
                     
                     tabelas_atuais_pdf = {}
