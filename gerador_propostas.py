@@ -683,10 +683,35 @@ if data_ready:
         with st.expander("4. Dados Atuais dos Leves Selecionados", expanded=False):
             st.markdown("### ℹ️ Contexto Atual das Bases Selecionadas")
             
+            incluir_orfaos = st.checkbox(
+                "Incluir pacotes entregues que não constam na abrangência da base", 
+                value=False,
+                help="Se marcado, a tabela abaixo mostrará todo o faturamento faturado pelo parceiro. Pacotes sem cidade registrada na base oficial de abrangência não serão considerados nos cenários simulados."
+            )
+            
+            if incluir_orfaos:
+                st.info("💡 **Atenção:** Esta opção afeta apenas a exibição desta Seção 4. As demais seções (Cenários e Relatórios) continuarão considerando estritamente o que está cadastrado na tabela de Abrangência Oficial do Leve para manter a consistência matemática.")
+            
             gambiarras_gerais = set()
 
             for leve in leves_selecionados:
                 vols_leve_raw = df_volume_grouped_raw[df_volume_grouped_raw['Leve'] == leve]
+                
+                # Rastreador de Órfãos
+                cidades_oficiais_leve = df_abrangencia_raw[df_abrangencia_raw['LMC Name'] == leve]['Cidade_Normalizada'].unique()
+                vols_orfaos = vols_leve_raw[~vols_leve_raw['Cidade_Normalizada'].isin(cidades_oficiais_leve)]
+                
+                if not vols_orfaos.empty:
+                    qtd_orfaos = vols_orfaos['# Total Packages'].sum()
+                    if incluir_orfaos:
+                        st.warning(f"⚠️ **Aviso de Conciliação:** A base **{leve}** faturou **{int(qtd_orfaos)} pacotes** em cidades que não existem na sua base de abrangência oficial. Mostrando abaixo os dados com esses pacotes incluídos.")
+                        with st.expander(f"Ver lista de cidades não mapeadas ({leve})"):
+                            st.dataframe(vols_orfaos[['Cidade', 'Região de preço', '# Total Packages']].sort_values(by='# Total Packages', ascending=False), hide_index=True)
+                    else:
+                        st.warning(f"⚠️ **Aviso de Conciliação:** A base **{leve}** faturou **{int(qtd_orfaos)} pacotes** em cidades não mapeadas na abrangência. Eles foram excluídos da tabela abaixo. Marque a caixinha acima para incluí-los.")
+                        # Remove os orfãos para mostrar a tabela matemática exata
+                        vols_leve_raw = vols_leve_raw[vols_leve_raw['Cidade_Normalizada'].isin(cidades_oficiais_leve)]
+
                 regioes_raw = vols_leve_raw['Região de preço'].dropna().unique()
                 
                 gambiarras_leve = [r for r in regioes_raw if str(r).endswith(" B") or str(r) in EQUIVALENCIAS_REGIOES]
@@ -832,14 +857,14 @@ if data_ready:
                         else: opcoes_reg += sorted(list(st.session_state.df_movimentacao[st.session_state.df_movimentacao['LMC Name'] == bulk_lmc]['Região de preço'].unique()))
                     bulk_reg = st.selectbox("2. Filtrar Região:", opcoes_reg, key="bulk_reg")
                 
-                cidades_disponiveis = []
+               cidades_disponiveis = []
                 if bulk_lmc != "Selecione...":
                     mask_cid = pd.Series([True]*len(st.session_state.df_movimentacao), index=st.session_state.df_movimentacao.index)
                     if bulk_lmc != "Todos os Leves": mask_cid &= st.session_state.df_movimentacao['LMC Name'] == bulk_lmc
                     if bulk_reg != "Todas as Regiões": mask_cid &= st.session_state.df_movimentacao['Região de preço'] == bulk_reg
                     cidades_disponiveis = sorted(list(st.session_state.df_movimentacao.loc[mask_cid, 'Cidade'].unique()))
                 
-                with col_m3: bulk_cidades = st.multiselect("3. Filtrar Cidades (Opcional):", cidades_disponiveis, key="bulk_cidades")
+                with col_m3: bulk_cidades = st.multiselect("3. Filtrar Cidades (Opcional):", cidades_disponiveis, max_selections=200, placeholder="Selecione até 200 cidades...", key="bulk_cidades")
 
                 col_m4, col_m5, col_m6 = st.columns([1.5, 1, 1])
                 with col_m4: bulk_dest = st.selectbox("4. Escolher Destino:", opcoes_destino, key="bulk_dest")
