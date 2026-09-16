@@ -125,10 +125,23 @@ def formatar_moeda(valor):
     try: return f"R$ {float(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
     except: return str(valor)
 
-def remover_sufixo_b(val):
+EQUIVALENCIAS_REGIOES = {
+    "AC RED": "AC INT 2", "AL RED": "AL INT 3", "AM RED": "AM INT", "AP RED": "AP INT 3",
+    "BA RED": "BA INT 5", "CE RED": "CE INT 2", "ES RED": "ES INT 3", "GO RED": "GO INT 4",
+    "MA RED": "MA INT 2", "MG RED": "MG INT 4", "MS RED": "MS INT 2", "MT RED": "MT INT 2",
+    "PA RED": "PA INT 3", "PE RED": "PE INT 3", "PE RED B": "PE INT 3", "PI RED": "PI INT 2",
+    "PR RED": "PR INT 4", "RJ RED": "RJ INT 3", "RN RED": "RN INT 2", "RO RED": "RO INT 3",
+    "RS RED": "RS INT 4", "SC RED": "SC INT 4", "SE RED": "SE INT 2", "SP RED": "SP INT 6",
+    "TO RED": "TO INT 3"
+}
+
+def limpar_regiao(val):
     if pd.isna(val): return val
     s = str(val).strip()
-    if s.endswith(" B"): return s[:-2].strip()
+    if s in EQUIVALENCIAS_REGIOES:
+        s = EQUIVALENCIAS_REGIOES[s]
+    if s.endswith(" B"):
+        s = s[:-2].strip()
     return s
 
 def padronizar_colunas_frete_raw(df):
@@ -142,6 +155,21 @@ def padronizar_colunas_abrangencia_raw(df):
 def padronizar_colunas_volume_raw(df):
     mapa = {"Package Charge Leve Last Mile Company Name": "Leve", "Distribution and Expedition Center Locations Routing Code": "Routing Code", "Package Charge Leve Region label": "Região de preço", "Package Charge Leve Region Label": "Região de preço", "Package Destination City": "Cidade", "Package Charge Leve Service Charge Type": "Service Charge Type", "Package Charge Leve # Packages": "# Total Packages", "Faixa pesos": "Faixa de peso cubado (g)", "Faixa Pesos": "Faixa de peso cubado (g)", "Package Charge Leve Faixa pesos": "Faixa de peso cubado (g)"}
     return df.rename(columns=mapa)
+
+def padronizar_colunas_frete(df):
+    df = padronizar_colunas_frete_raw(df)
+    if 'label' in df.columns: df['label'] = df['label'].apply(limpar_regiao)
+    return df
+
+def padronizar_colunas_abrangencia(df):
+    df = padronizar_colunas_abrangencia_raw(df)
+    if 'Região de preço 2023' in df.columns: df['Região de preço 2023'] = df['Região de preço 2023'].apply(limpar_regiao)
+    return df
+
+def padronizar_colunas_volume(df):
+    df = padronizar_colunas_volume_raw(df)
+    if 'Região de preço' in df.columns: df['Região de preço'] = df['Região de preço'].apply(limpar_regiao)
+    return df
 
 @st.cache_data
 def processar_frete(df_frete):
@@ -195,6 +223,7 @@ def formatar_excel_proposta(writer):
     for sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
         ws.sheet_view.showGridLines = False
+        ws.freeze_panes = 'A2'
         col_formats = {}
         for row in ws.iter_rows(min_row=1, max_row=50):
             for cell in row:
@@ -236,7 +265,8 @@ def formatar_excel_resumo(writer, cenarios_nomes):
     for sheet_name in workbook.sheetnames:
         ws = workbook[sheet_name]
         ws.sheet_view.showGridLines = False
-        header_map = {} 
+        ws.freeze_panes = 'A2'
+        header_map = {}
         for row in ws.iter_rows():
             r_idx = row[0].row
             first_val = str(row[0].value).strip() if row[0].value is not None else ""
@@ -585,11 +615,11 @@ if data_ready:
     
     # 2. CLEAN DFs (Aplicando a remoção do sufixo " B")
     df_frete_clean_std = st.session_state.df_frete_std.copy()
-    if 'label' in df_frete_clean_std.columns: df_frete_clean_std['label'] = df_frete_clean_std['label'].apply(remover_sufixo_b)
+    if 'label' in df_frete_clean_std.columns: df_frete_clean_std['label'] = df_frete_clean_std['label'].apply(limpar_regiao)
     df_frete_clean = processar_frete(df_frete_clean_std)
     
     df_volume_clean_std = st.session_state.df_volume_std.copy()
-    if 'Região de preço' in df_volume_clean_std.columns: df_volume_clean_std['Região de preço'] = df_volume_clean_std['Região de preço'].apply(remover_sufixo_b)
+    if 'Região de preço' in df_volume_clean_std.columns: df_volume_clean_std['Região de preço'] = df_volume_clean_std['Região de preço'].apply(limpar_regiao)
     df_volume_tmp_clean = df_volume_clean_std.copy()
     df_volume_tmp_clean['Faixa de peso cubado (g)'] = df_volume_tmp_clean['Faixa de peso cubado (g)'].astype(str).str.strip()
     df_volume_grouped_clean = df_volume_tmp_clean.groupby(
@@ -597,7 +627,7 @@ if data_ready:
     ).agg({'# Total Packages': 'sum', 'Cidade': 'first'})
     
     df_abrangencia_clean_std = st.session_state.df_abrangencia_std.copy()
-    if 'Região de preço 2023' in df_abrangencia_clean_std.columns: df_abrangencia_clean_std['Região de preço 2023'] = df_abrangencia_clean_std['Região de preço 2023'].apply(remover_sufixo_b)
+    if 'Região de preço 2023' in df_abrangencia_clean_std.columns: df_abrangencia_clean_std['Região de preço 2023'] = df_abrangencia_clean_std['Região de preço 2023'].apply(limpar_regiao)
 
     df_slos_clean = processar_slos_novo(df_slos_raw)
     df_nomes_leves = processar_nomes_leves(st.session_state.df_volume_std)
@@ -659,9 +689,9 @@ if data_ready:
                 vols_leve_raw = df_volume_grouped_raw[df_volume_grouped_raw['Leve'] == leve]
                 regioes_raw = vols_leve_raw['Região de preço'].dropna().unique()
                 
-                gambiarras_leve = [r for r in regioes_raw if str(r).endswith(" B")]
+                gambiarras_leve = [r for r in regioes_raw if str(r).endswith(" B") or str(r) in EQUIVALENCIAS_REGIOES]
                 if gambiarras_leve:
-                    st.warning(f"⚠️ **Atenção:** A base **{leve}** possui regiões de preço fora do padrão: **{', '.join(gambiarras_leve)}**.")
+                    st.warning(f"⚠️ **Atenção:** A base **{leve}** possui nomenclaturas desatualizadas ou fora do padrão: **{', '.join(gambiarras_leve)}**.")
                     gambiarras_gerais.update(gambiarras_leve)
                 
                 if len(regioes_raw) > 0:
@@ -852,7 +882,7 @@ if data_ready:
             mult_dict_cod = dict(zip(df_price_var_clean['Cod'], df_price_var_clean['Multiplicador']))
             
             for clean_reg in regioes_finais_destino:
-                raw_regs = [r for r in df_volume_alvo_raw['Região de preço'].unique() if remover_sufixo_b(r) == clean_reg]
+                raw_regs = [r for r in df_volume_alvo_raw['Região de preço'].unique() if limpar_regiao(r) == clean_reg]
                 
                 c_on = 0; s_mult = 0
                 for raw_reg in raw_regs:
@@ -906,9 +936,9 @@ if data_ready:
                 
                 if st.session_state.get('gambiarras_encontradas'):
                     gambiarras = list(st.session_state['gambiarras_encontradas'])
-                    gambiarras_str = ", ".join(gambiarras)
-                    gambiarras_clean_str = ", ".join(list(set([remover_sufixo_b(g) for g in gambiarras])))
-                    st.info(f"ℹ️ **Nota de Padronização:** As regiões de preço fora do padrão ({gambiarras_str}) foram incorporadas às suas respectivas regiões originais ({gambiarras_clean_str}). A tabela base abaixo foi calculada absorvendo o volume e os preços reais de todas as variações.")
+                    st.info("ℹ️ **Nota de Padronização:** O sistema identificou nomenclaturas antigas na aba anterior. Para garantir simulações precisas, os volumes e valores reais foram absorvidos e as regiões foram remapeadas conforme abaixo:")
+                    for g in gambiarras:
+                        st.markdown(f"- **{g}** ➔ Atualizada para **{limpar_regiao(g)}**")
                 
                 if df_movidos.empty and tipo_destino == "Um Novo Lead":
                     st.warning("Nenhum município foi movimentado para o Novo Lead ainda.")
@@ -960,7 +990,7 @@ if data_ready:
                 tot_fat_context = 0
                 
                 for clean_reg in regioes_finais_destino:
-                    raw_regs = [r for r in df_volume_alvo_raw['Região de preço'].unique() if remover_sufixo_b(r) == clean_reg]
+                    raw_regs = [r for r in df_volume_alvo_raw['Região de preço'].unique() if limpar_regiao(r) == clean_reg]
                     vol_total = 0
                     c_on_total = 0
                     
@@ -1044,6 +1074,12 @@ if data_ready:
 
                     tabs_cenarios = st.tabs(cenarios_nomes)
                     
+                    if "bkp_cenarios" not in st.session_state:
+                        st.session_state.bkp_cenarios = {}
+                        
+                    def backup_input(key):
+                        st.session_state.bkp_cenarios[key] = st.session_state[key]
+
                     for c_idx, tab in enumerate(tabs_cenarios):
                         cen_id = f"c{c_idx+1}"
                         with tab:
@@ -1057,26 +1093,36 @@ if data_ready:
                                     t = st.session_state[f"global_tipo_{c_id}"]
                                     v = st.session_state[f"global_val_{c_id}"]
                                     for r in regioes_finais_destino:
-                                        st.session_state[f"tipo_{c_id}_{r}"] = t
-                                        st.session_state[f"val_{c_id}_{r}"] = v
+                                        k_t, k_v = f"tipo_{c_id}_{r}", f"val_{c_id}_{r}"
+                                        st.session_state[k_t] = t
+                                        st.session_state[k_v] = v
+                                        st.session_state.bkp_cenarios[k_t] = t
+                                        st.session_state.bkp_cenarios[k_v] = v
                                 st.button("Aplicar a todas", key=f"btn_glob_{cen_id}", on_click=aplicar_global)
                             
                             st.divider()
                             st.markdown("**Ajustes Individuais:**")
                             cols_ajuste = st.columns(3)
                             for i, regiao in enumerate(regioes_finais_destino):
-                                if f"tipo_{cen_id}_{regiao}" not in st.session_state: st.session_state[f"tipo_{cen_id}_{regiao}"] = "%"
-                                if f"val_{cen_id}_{regiao}" not in st.session_state: st.session_state[f"val_{cen_id}_{regiao}"] = 0.0
+                                k_tipo = f"tipo_{cen_id}_{regiao}"
+                                k_val = f"val_{cen_id}_{regiao}"
+                                
+                                if k_tipo not in st.session_state:
+                                    st.session_state[k_tipo] = st.session_state.bkp_cenarios.get(k_tipo, "%")
+                                if k_val not in st.session_state:
+                                    st.session_state[k_val] = st.session_state.bkp_cenarios.get(k_val, 0.0)
                                 
                                 with cols_ajuste[i % 3]:
                                     st.markdown(f"**{regiao}**")
                                     c_tipo, c_val, c_btn = st.columns([2, 2, 1.5])
-                                    with c_tipo: st.selectbox("Tipo", ["%", "R$ (1ª Faixa)", "R$ (Ticket Médio)"], key=f"tipo_{cen_id}_{regiao}", label_visibility="collapsed")
-                                    with c_val: st.number_input("Valor", step=0.5, format="%.2f", key=f"val_{cen_id}_{regiao}", label_visibility="collapsed")
+                                    with c_tipo: st.selectbox("Tipo", ["%", "R$ (1ª Faixa)", "R$ (Ticket Médio)"], key=k_tipo, label_visibility="collapsed", on_change=backup_input, args=(k_tipo,))
+                                    with c_val: st.number_input("Valor", step=0.5, format="%.2f", key=k_val, label_visibility="collapsed", on_change=backup_input, args=(k_val,))
                                     with c_btn:
-                                        def zerar_reg(c_id=cen_id, r=regiao):
-                                            st.session_state[f"tipo_{c_id}_{r}"] = "%"
-                                            st.session_state[f"val_{c_id}_{r}"] = 0.0
+                                        def zerar_reg(k_t=k_tipo, k_v=k_val):
+                                            st.session_state[k_t] = "%"
+                                            st.session_state[k_v] = 0.0
+                                            st.session_state.bkp_cenarios[k_t] = "%"
+                                            st.session_state.bkp_cenarios[k_v] = 0.0
                                         st.button("Zerar", key=f"btn_zerar_{cen_id}_{regiao}", on_click=zerar_reg, use_container_width=True)
                                     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1097,7 +1143,7 @@ if data_ready:
                         vol_total_cenario = 0
                         
                         for clean_reg in regioes_finais_destino:
-                            raw_regs = [r for r in df_volume_alvo_raw['Região de preço'].unique() if remover_sufixo_b(r) == clean_reg]
+                            raw_regs = [r for r in df_volume_alvo_raw['Região de preço'].unique() if limpar_regiao(r) == clean_reg]
                             vol_regiao_total_sim = 0
                             for raw_reg in raw_regs:
                                 vols_raw_reg = df_volume_alvo_raw[df_volume_alvo_raw['Região de preço'] == raw_reg]
