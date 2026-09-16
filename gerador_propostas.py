@@ -266,7 +266,7 @@ def formatar_excel_resumo(writer, cenarios_nomes):
         ws = workbook[sheet_name]
         ws.sheet_view.showGridLines = False
         ws.freeze_panes = 'A2'
-        header_map = {}
+        header_map = {} 
         for row in ws.iter_rows():
             r_idx = row[0].row
             first_val = str(row[0].value).strip() if row[0].value is not None else ""
@@ -857,7 +857,7 @@ if data_ready:
                         else: opcoes_reg += sorted(list(st.session_state.df_movimentacao[st.session_state.df_movimentacao['LMC Name'] == bulk_lmc]['Região de preço'].unique()))
                     bulk_reg = st.selectbox("2. Filtrar Região:", opcoes_reg, key="bulk_reg")
                 
-               cidades_disponiveis = []
+                cidades_disponiveis = []
                 if bulk_lmc != "Selecione...":
                     mask_cid = pd.Series([True]*len(st.session_state.df_movimentacao), index=st.session_state.df_movimentacao.index)
                     if bulk_lmc != "Todos os Leves": mask_cid &= st.session_state.df_movimentacao['LMC Name'] == bulk_lmc
