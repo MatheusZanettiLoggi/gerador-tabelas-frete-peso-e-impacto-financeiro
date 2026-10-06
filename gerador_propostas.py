@@ -285,7 +285,7 @@ def formatar_excel_resumo(writer, cenarios_nomes):
                 col_name_lower = col_name.lower()
                 cell.alignment = alinhamento
                 cell.border = borda_cinza
-                if any(x in col_name_lower for x in ['fat', 'ticket', 'tk', 'impacto', 'atual', '(r$)', 'tarifa', 'custo', 'diferença', 'projetado']):
+                if any(x in col_name_lower for x in ['fat', 'ticket', 'tk', 'impacto', 'atual', '(r$)', 'tarifa', 'custo', 'diferença', 'projetado', '1ª fx', '1ª faixa']):
                     if "volumetria" not in col_name_lower and "pacotes" not in col_name_lower: cell.number_format = '"R$" #,##0.00'
                 if "%" in col_name_lower or "aum" in col_name_lower or "comercial" in col_name_lower: cell.number_format = '0.00%'
                 if "volumetria" in col_name_lower or "volume" in col_name_lower or "pacotes" in col_name_lower: cell.number_format = '#,##0'
@@ -446,9 +446,11 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
     html_content += f"""<h2>1. RESUMO COMPARATIVO DE CENÁRIOS</h2>"""
     df_resumo_html = df_comparativo.copy()
     for c in df_resumo_html.columns:
-        if "Fat" in c or "Ticket" in c or "TK" in c or "Impacto" in c or "Atual" in c:
+        df_resumo_html = df_comparativo.copy()
+    for c in df_resumo_html.columns:
+        if any(term in c for term in ["Fat", "Ticket", "TK", "Impacto", "Atual", "1ª Fx", "1ª Faixa"]):
             if c != 'Região de Preço' and c != 'Volumetria' and "%" not in c:
-                df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_money_local(x) if pd.notna(x) and isinstance(x, (int, float)) else x)
+                df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_money_local(x) if x != "-" and pd.notna(x) else "-")
         elif "%" in c or "Aum" in c: df_resumo_html[c] = df_resumo_html[c].apply(lambda x: format_perc_local(x * 100) if pd.notna(x) and isinstance(x, (int, float)) else x)
         elif "Vol" in c: df_resumo_html[c] = df_resumo_html[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if pd.notna(x) else "-")
 
@@ -1423,6 +1425,10 @@ if data_ready:
                             if any(term in c for term in ["Fat", "Ticket", "TK", "Impacto", "Atual", "1ª Fx", "1ª Faixa"]):
                                 if c != 'Região de Preço' and c != 'Volumetria' and "%" not in c:
                                     df_disp[c] = df_disp[c].apply(lambda x: formatar_moeda(x) if x != "-" and pd.notna(x) else "-")
+                            elif "%" in c or "Aum" in c:
+                                df_disp[c] = df_disp[c].apply(lambda x: f"{x*100:+.2f}%" if x != "-" and pd.notna(x) else "-")
+                            elif "Vol" in c:
+                                df_disp[c] = df_disp[c].apply(lambda x: f"{int(x):,}".replace(",", ".") if x != "-" and pd.notna(x) else "-")
                             elif "%" in c or "Aum" in c:
                                 df_disp[c] = df_disp[c].apply(lambda x: f"{x*100:+.2f}%" if pd.notna(x) else "-")
                             elif "Vol" in c:
