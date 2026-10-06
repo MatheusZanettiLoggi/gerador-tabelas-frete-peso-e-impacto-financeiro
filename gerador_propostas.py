@@ -1280,13 +1280,18 @@ if data_ready:
                             fat_simulado_total += c_novo_reg
                             vol_total_cenario += vol_regiao_total_sim
 
+                           # Extrai valor da primeira faixa projetada
+                            val_fx1_proj = df_regiao_tabela['Valor dentro do prazo'].values[0] if not df_regiao_tabela.empty else 0.0
+
                             resultados_cenarios.append({
                                 "Cenário": cenario_nome,
                                 "Região de Preço": clean_reg,
                                 "Volumetria": vol_regiao_total_sim,
                                 "Faturamento Atual": c_atual_reg,
+                                "Valor 1ª Faixa Atual": dict_base_on.get(clean_reg, 0) * 0.83,
                                 "Ticket Médio Atual": c_atual_reg / vol_regiao_total_sim if vol_regiao_total_sim > 0 else 0,
                                 "Faturamento Projetado": c_novo_reg,
+                                "Valor 1ª Faixa Projetada": val_fx1_proj,
                                 "Ticket Médio Projetado": c_novo_reg / vol_regiao_total_sim if vol_regiao_total_sim > 0 else 0,
                                 "Impacto Financeiro (R$)": c_novo_reg - c_atual_reg,
                                 "% Aumento": (c_novo_reg / c_atual_reg - 1) if c_atual_reg > 0 else 0
@@ -1307,8 +1312,10 @@ if data_ready:
                             "Região de Preço": "Total Geral",
                             "Volumetria": vol_total_cenario,
                             "Faturamento Atual": fat_atual_total,
+                            "Valor 1ª Faixa Atual": "-",
                             "Ticket Médio Atual": fat_atual_total / vol_total_cenario if vol_total_cenario > 0 else 0,
                             "Faturamento Projetado": fat_simulado_total,
+                            "Valor 1ª Faixa Projetada": "-",
                             "Ticket Médio Projetado": fat_simulado_total / vol_total_cenario if vol_total_cenario > 0 else 0,
                             "Impacto Financeiro (R$)": fat_simulado_total - fat_atual_total,
                             "% Aumento": (fat_simulado_total / fat_atual_total - 1) if fat_atual_total > 0 else 0
@@ -1344,18 +1351,21 @@ if data_ready:
                         }
 
                     df_res_bruto = pd.DataFrame(resultados_cenarios)
-                    df_base_atual = df_res_bruto[df_res_bruto['Cenário'] == cenarios_nomes[0]][['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual']]
+                    df_base_atual = df_res_bruto[df_res_bruto['Cenário'] == cenarios_nomes[0]][['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Valor 1ª Faixa Atual', 'Ticket Médio Atual']]
                     df_comparativo = df_base_atual.copy()
                     
                     for cen in cenarios_nomes:
-                        df_c = df_res_bruto[df_res_bruto['Cenário'] == cen][['Região de Preço', 'Faturamento Projetado', 'Ticket Médio Projetado', 'Impacto Financeiro (R$)', '% Aumento']]
-                        df_c.columns = ['Região de Preço', f'Fat. {cen}', f'TK {cen}', f'Impacto {cen}', f'% Aum. {cen}']
+                        df_c = df_res_bruto[df_res_bruto['Cenário'] == cen][['Região de Preço', 'Faturamento Projetado', 'Valor 1ª Faixa Projetada', 'Ticket Médio Projetado', 'Impacto Financeiro (R$)', '% Aumento']]
+                        df_c.columns = ['Região de Preço', f'Fat. {cen}', f'1ª Fx {cen}', f'TK {cen}', f'Impacto {cen}', f'% Aum. {cen}']
                         df_comparativo = df_comparativo.merge(df_c, on='Região de Preço')
                     
                     row_total = df_comparativo[df_comparativo['Região de Preço'] == 'Total Geral']
                     df_comparativo = df_comparativo[df_comparativo['Região de Preço'] != 'Total Geral']
                     df_comparativo = pd.concat([df_comparativo, row_total], ignore_index=True)
                     
+                    # Salva uma cópia dos números "puros" para os Detalhes do Excel, ANTES da formatação de moeda que transforma em strings
+                    df_comparativo_numerico = df_comparativo.copy()
+
                     # --- EXIBIÇÃO EM ABAS (SEÇÃO 9) ---
                     css_tabs_resumo = "<style>"
                     for i in range(st.session_state["num_cenarios"]):
@@ -1410,9 +1420,9 @@ if data_ready:
                         
                         df_disp = df_comparativo.copy()
                         for c in df_disp.columns:
-                            if "Fat" in c or "Ticket" in c or "TK" in c or "Impacto" in c or "Atual" in c:
+                            if any(term in c for term in ["Fat", "Ticket", "TK", "Impacto", "Atual", "1ª Fx", "1ª Faixa"]):
                                 if c != 'Região de Preço' and c != 'Volumetria' and "%" not in c:
-                                    df_disp[c] = df_disp[c].apply(lambda x: formatar_moeda(x) if pd.notna(x) else "-")
+                                    df_disp[c] = df_disp[c].apply(lambda x: formatar_moeda(x) if x != "-" and pd.notna(x) else "-")
                             elif "%" in c or "Aum" in c:
                                 df_disp[c] = df_disp[c].apply(lambda x: f"{x*100:+.2f}%" if pd.notna(x) else "-")
                             elif "Vol" in c:
@@ -1591,8 +1601,9 @@ if data_ready:
                                     df_aud = dict_auditorias[cen_name]
                                     sn = f"Detalhes {cen_name}"[:31]
                                     
-                                    cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
-                                    df_cen_resumo = df_comparativo[cols_resumo].copy()
+                                    cols_resumo = ['Região de Preço', 'Volumetria', 'Faturamento Atual', 'Valor 1ª Faixa Atual', 'Ticket Médio Atual', f'Fat. {cen_name}', f'1ª Fx {cen_name}', f'TK {cen_name}', f'Impacto {cen_name}', f'% Aum. {cen_name}']
+
+                                    df_cen_resumo = df_comparativo_numerico[cols_resumo].copy()
                                     
                                     # Montagem Segura de Duas Tabelas na mesma Aba
                                     df_cen_resumo.to_excel(writer, sheet_name=sn, startrow=0, index=False)
