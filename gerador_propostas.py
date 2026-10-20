@@ -1555,11 +1555,15 @@ if data_ready:
                                 fat_mig_val = m['fat_migrado_projetado']
                                 reajuste_base_val = val_cresc - fat_mig_val
                                 
-                                fat_mig_str = formatar_moeda(fat_mig_val)
-                                str_reajuste = f"+{formatar_moeda(reajuste_base_val)}" if reajuste_base_val > 0 else (f"-{formatar_moeda(abs(reajuste_base_val))}" if reajuste_base_val < 0 else "R$ 0,00")
-                                cor_reajuste = "#09ab3b" if reajuste_base_val >= 0 else "#ff4b4b"
+                                fat_mig_str = formatar_moeda(fat_mig_val).replace("R$", "R\$")
                                 
-                                st.info(f"💡 **Detalhamento do Crescimento:** Os municípios anexados (**{mun_str}**) representam **{vol_mig:,} pacotes** e adicionam **{fat_mig_str}** ao faturamento. A variação da nova curva tarifária sobre os pacotes que o parceiro já possuía gerou um reajuste de <span style='color: {cor_reajuste}; font-weight: bold;'>{str_reajuste}</span>.", icon="📦")
+                                str_reajuste = f"+{formatar_moeda(reajuste_base_val)}" if reajuste_base_val > 0 else (f"-{formatar_moeda(abs(reajuste_base_val))}" if reajuste_base_val < 0 else "R$ 0,00")
+                                str_reajuste = str_reajuste.replace("R$", "R\$")
+                                
+                                str_total = f"+{formatar_moeda(val_cresc)}" if val_cresc > 0 else (f"-{formatar_moeda(abs(val_cresc))}" if val_cresc < 0 else "R$ 0,00")
+                                str_total = str_total.replace("R$", "R\$")
+                                
+                                st.info(f"💡 **Detalhamento do Crescimento:** Os municípios anexados (**{mun_str}**) representam **{vol_mig:,} pacotes** e adicionam **{fat_mig_str}** ao faturamento. A variação da nova curva tarifária sobre os pacotes que o parceiro já possuía gerou um reajuste de **{str_reajuste}**, totalizando **{str_total}**.", icon="📦")
 
                             st.divider()
                             st.subheader(f"🐰 Visão Loggi ({cen})")
