@@ -465,8 +465,14 @@ def generate_html_pdf(nome_destino, estrategia, cidades_movimentadas_str, df_com
         if metricas.get('municipios_migrados_nomes'):
             mun_str = ", ".join(metricas['municipios_migrados_nomes'])
             vol_mig = int(metricas['vol_migrado'])
-            fat_mig = format_money_local(metricas['fat_migrado_projetado'])
-            migrated_html = f"<div style='background-color: #e6f2ff; padding: 10px; border-left: 4px solid #006aff; margin-top: 10px; font-size: 8.5pt;'><b>Cidades Adicionadas:</b> Estamos adicionando os municípios de <b>{mun_str}</b>, que representam um volume de <b>{vol_mig:,} pacotes</b> a mais e um faturamento projetado adicional de <b>{fat_mig}</b>, compondo o Novo Faturamento Projetado.</div>"
+            fat_mig_val = metricas['fat_migrado_projetado']
+            reajuste_base_val = cresc_fat_val - fat_mig_val
+            
+            fat_mig_str = format_money_local(fat_mig_val)
+            str_reajuste = f"+{format_money_local(reajuste_base_val)}" if reajuste_base_val > 0 else (f"-{format_money_local(abs(reajuste_base_val))}" if reajuste_base_val < 0 else "R$ 0,00")
+            cor_reajuste = "#09ab3b" if reajuste_base_val >= 0 else "#ff4b4b"
+            
+            migrated_html = f"<div style='background-color: #e6f2ff; padding: 10px; border-left: 4px solid #006aff; margin-top: 10px; font-size: 8.5pt;'><b>Cidades Adicionadas:</b> Os municípios anexados (<b>{mun_str}</b>) representam <b>{vol_mig:,} pacotes</b> e adicionam <b>{fat_mig_str}</b> ao faturamento. A variação da nova curva tarifária sobre os pacotes que o parceiro já possuía gerou um reajuste de <span style='color: {cor_reajuste}; font-weight: bold;'>{str_reajuste}</span>.</div>"
 
         html_content += f"""<div class="page-break"></div><h2>DETALHAMENTO: {cenario_nome.upper()}</h2>"""
         html_content += f"""
