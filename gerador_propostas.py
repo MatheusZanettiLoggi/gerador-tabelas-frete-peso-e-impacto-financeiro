@@ -1533,7 +1533,7 @@ if data_ready:
                                 val_cresc = m['cresc_fat_parceiro']
                                 str_cresc = f"+{formatar_moeda(val_cresc)}" if val_cresc > 0 else (f"-{formatar_moeda(abs(val_cresc))}" if val_cresc < 0 else "R$ 0,00")
                                 
-                                st.markdown(f"<div style='font-size: 14px; color: gray;'>Crescimento da Operação</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div style='font-size: 14px; color: gray;'>Crescimento Total da Operação</div>", unsafe_allow_html=True)
                                 st.markdown(f"<div style='font-size: 1.8rem; font-weight: normal; margin-bottom: 5px;'>{str_cresc}</div>", unsafe_allow_html=True)
                                 
                                 if m['perc_cresc_parceiro'] > 0:
@@ -1546,8 +1546,14 @@ if data_ready:
                             if m['municipios_migrados_nomes']:
                                 mun_str = ", ".join(m['municipios_migrados_nomes'])
                                 vol_mig = int(m['vol_migrado'])
-                                fat_mig = formatar_moeda(m['fat_migrado_projetado'])
-                                st.info(f"💡 **Cidades Adicionadas:** Estamos adicionando os municípios de **{mun_str}**, que representam um volume de **{vol_mig:,} pacotes** a mais e um faturamento projetado adicional de **{fat_mig}**, compondo o Novo Faturamento Projetado.")
+                                fat_mig_val = m['fat_migrado_projetado']
+                                reajuste_base_val = val_cresc - fat_mig_val
+                                
+                                fat_mig_str = formatar_moeda(fat_mig_val)
+                                str_reajuste = f"+{formatar_moeda(reajuste_base_val)}" if reajuste_base_val > 0 else (f"-{formatar_moeda(abs(reajuste_base_val))}" if reajuste_base_val < 0 else "R$ 0,00")
+                                cor_reajuste = "#09ab3b" if reajuste_base_val >= 0 else "#ff4b4b"
+                                
+                                st.info(f"💡 **Detalhamento do Crescimento:** Os municípios anexados (**{mun_str}**) representam **{vol_mig:,} pacotes** e adicionam **{fat_mig_str}** ao faturamento. A variação da nova curva tarifária sobre os pacotes que o parceiro já possuía gerou um reajuste de <span style='color: {cor_reajuste}; font-weight: bold;'>{str_reajuste}</span>.", icon="📦")
 
                             st.divider()
                             st.subheader(f"🐰 Visão Loggi ({cen})")
